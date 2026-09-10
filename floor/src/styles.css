@@ -1,0 +1,128 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant landscape-short (@media (orientation: landscape) and (max-height: 500px));
+
+/*
+ * Design system — warm sand palette aligned with Distress Survey.
+ * Light-only. Semantic tokens map to Tailwind utilities via @theme inline.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-toggle-on: var(--toggle-on);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.75rem;
+
+  /* Warm sand palette */
+  --background: oklch(0.949 0.012 82);           /* #f4f0e8 sand */
+  --foreground: oklch(0.191 0 0);                /* #1a1a1a ink */
+
+  --card: oklch(0.985 0.014 85);                 /* #fffaf0 cream */
+  --card-foreground: oklch(0.191 0 0);
+
+  --popover: oklch(0.985 0.014 85);
+  --popover-foreground: oklch(0.191 0 0);
+
+  --primary: oklch(0.555 0.115 45);              /* burnt sienna — warmer, less red */
+  --primary-foreground: oklch(0.985 0.014 85);
+
+  /* Muted olive-brown for toggle "on" — recedes so 9 stacked switches don't scream */
+  --toggle-on: oklch(0.470 0.045 75);
+
+  --secondary: oklch(0.918 0.018 82);            /* warm sand-2 */
+  --secondary-foreground: oklch(0.191 0 0);
+
+  --muted: oklch(0.918 0.018 82);
+  --muted-foreground: oklch(0.510 0.014 75);     /* #7a7468 brown-gray */
+
+  --accent: oklch(0.895 0.038 35);               /* #f3d8ce soft peach */
+  --accent-foreground: oklch(0.320 0.120 35);
+
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0.014 85);
+
+  --border: oklch(0.848 0.020 82);               /* #d9d2c2 sandy line */
+  --input: oklch(0.848 0.020 82);
+  --ring: oklch(0.556 0.170 35);
+
+  --chart-1: oklch(0.556 0.170 35);
+  --chart-2: oklch(0.510 0.014 75);
+  --chart-3: oklch(0.848 0.020 82);
+  --chart-4: oklch(0.895 0.038 35);
+  --chart-5: oklch(0.320 0.120 35);
+
+  --sidebar: oklch(0.949 0.012 82);
+  --sidebar-foreground: oklch(0.191 0 0);
+  --sidebar-primary: oklch(0.556 0.170 35);
+  --sidebar-primary-foreground: oklch(0.985 0.014 85);
+  --sidebar-accent: oklch(0.895 0.038 35);
+  --sidebar-accent-foreground: oklch(0.320 0.120 35);
+  --sidebar-border: oklch(0.848 0.020 82);
+  --sidebar-ring: oklch(0.556 0.170 35);
+}
+
+@utility label-micro {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    font-size: 16px;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
+}
