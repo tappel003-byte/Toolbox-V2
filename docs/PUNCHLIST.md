@@ -88,3 +88,82 @@ that's an honest "not cached here," not a bug to route around.
 - Changing Floor Survey's storage.
 - Wiring the drawer buttons in `job.html` to real URLs.
 - Any multi-device live sync (that's the longer-term vision, not this).
+
+## Update: room auto-fill, ported into the cabinet (built)
+
+Tim asked for Distress Survey's room auto-fill to happen on Toolbox's
+setup screen, and for Floor Survey's setup screen to be looked at for the
+same consolidation. Here's what was found and what was actually built —
+all inside Toolbox-V2 only, nothing changed in Distress or Floor.
+
+**What Distress Survey's setup screen (`#screenSetup` in `survey.html`)
+actually does**, beyond address/plan/front-door:
+- A **Building Type** picker (Residential, Office, Medical, Vet, Dental,
+  Warehouse) that selects a preset room list — a "Common" fast-tap set
+  and a larger "Specialty" set (`BUILDING_TYPES` in `survey.html`).
+- **"🔍 Read labels"** — loads Tesseract.js (`cdn.jsdelivr.net/npm/tesseract.js@5.1.1`,
+  loaded on demand, not bundled) and runs 7 OCR passes over the plan
+  photo (color-label-pill isolation for CAD-style red/orange room tags,
+  upright, block-mode, and both sideways rotations), matches recognized
+  text against a large regex alias table (`ROOM_KEYWORD_ALIASES`) to snap
+  it to a canonical preset name, and drops each match onto the plan at
+  the position it was read from. Cross-pass voting and confidence floors
+  suppress one-off misreads.
+- **"➕ Find more"** — an additive deep pass: 6000px upscale, a 5×5
+  tiled grid with overlap, plus a digit-only whitelist pass for
+  commercial room numbers ("143", "101A"). Only adds; never renames or
+  removes what's already there.
+- Rooms are chips on the setup screen and pins on the plan photo; tap a
+  chip or pin to remove it.
+
+**What Floor Survey's setup screen (`SetupTab.tsx`) does** — a different
+shape, not room-based:
+1. **Details** — inspection date, project name, address, client,
+   inspector, notes. This is a straight duplicate of fields Toolbox's
+   job screen already has.
+2. **Plan** — Floor Survey supports **multiple floors**, each an
+   independent record with its own uploaded plan image
+   (`{id, name, planDataUrl, planWidth, planHeight, boundary}`).
+3. **Topo boundary** — freehand polygon(s) drawn on each floor's plan,
+   used as the area a topo survey will actually measure.
+4. **Excluded areas** — more polygons marking regions to skip inside a
+   boundary.
+There is no "rooms" concept in Floor Survey — steps 3–4 are about survey
+geometry, not room labels, so Distress's OCR engine doesn't map onto it.
+
+**Built into Toolbox-V2's job screen** (`js/room-ocr.js`, wired into
+`job.html`/`js/job.js`): the Building Type picker, the fast-tap chip
+list, "🔍 Read labels" and "➕ Find more", ported faithfully from
+`survey.html` (same regex tables, same multi-pass/tiling/voting logic,
+same Tesseract.js version/CDN). Rooms in the cabinet's schema are now
+`{id, name, x?, y?}` — `x`/`y` are set when a room came from a tap or an
+OCR hit, and rendered as pins on the plan photo; chip-added and manually
+typed rooms stay position-less until a scan places them. This covers the
+part of Floor Survey's Details step that overlaps the cabinet (address,
+inspector, notes, etc. already exist here) — nothing new was needed
+there.
+
+**Not built, and flagged before going further — needs Tim/Grok's call:**
+
+Floor Survey's **multi-floor** model and its **topo boundary /
+excluded-area** drawing do not fit the cabinet's current one-plan-per-job
+shape, and they read more like the drawer's own capture/thinking than
+cabinet setup:
+- The vision doc names "plan photo, rooms, front door" as cabinet fields.
+  It does not name topo boundaries or multiple floors. Marking out where
+  a topo survey will actually measure looks like survey work, not
+  administrative setup — closer to "capture" than to the cabinet's job.
+- If boundary/exclusion drawing does move into the cabinet anyway, the
+  job pocket's schema needs a real rethink first: one `planImage` per job
+  becomes a `floors: [{name, planImage, boundary, exclusions}]` array,
+  which changes what "the plan photo" means everywhere else in Toolbox
+  (the front-door marker is currently placed on *the* plan; which floor's
+  plan would it belong to?).
+
+Before touching either of those, or before any actual wiring of Distress
+Survey / Floor Survey to read from the pocket (the "transfer out to the
+apps" half), this punch list needs Tim to say explicitly: (a) does topo
+boundary/exclusion drawing belong in the cabinet's job schema, and (b)
+the exact change to make in each app's own repo — per the hard rule,
+neither `field-reporter-pro` nor `floorplan-topo-maker` gets edited on a
+general instruction alone.
