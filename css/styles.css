@@ -1,14 +1,16 @@
-/* Toolbox V2 — temporary working look. Not a final brand. Phone-first. */
+/* Toolbox V2 — standardized on Distress Survey's palette and icon so the
+   cabinet and every drawer read as one product. See docs/PUNCHLIST.md. */
 
 :root {
-  --bg: #f4f5f7;
-  --panel: #ffffff;
-  --ink: #1c1f26;
-  --ink-soft: #5a6070;
-  --line: #dfe2e8;
-  --accent: #2a5db0;
+  --bg: #f4f0e8;
+  --panel: #fffaf0;
+  --ink: #1a1a1a;
+  --ink-soft: #7a7468;
+  --line: #d9d2c2;
+  --accent: #c14a2b;
+  --accent-soft: #f3d8ce;
   --accent-ink: #ffffff;
-  --danger: #b0302a;
+  --danger: #c14a2b;
   --radius: 10px;
 }
 
@@ -77,9 +79,9 @@ main {
 }
 
 .btn-primary {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: var(--accent);
+  background: var(--ink);
+  color: var(--panel);
+  border-color: var(--ink);
 }
 
 .btn-danger {
@@ -238,21 +240,21 @@ fieldset legend {
   gap: 4px;
   padding: 2px 8px 2px 4px;
   border-radius: 999px;
-  background: #1a8f5e;
-  color: #fff;
+  background: var(--ink);
+  color: var(--panel);
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
   box-shadow: 0 1px 4px rgba(0,0,0,0.4);
   cursor: pointer;
-  border: 2px solid #fff;
+  border: 2px solid var(--panel);
 }
 
 .room-marker .dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--panel);
   flex-shrink: 0;
 }
 
@@ -273,9 +275,9 @@ fieldset legend {
 }
 
 .chip.chip-added {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-soft);
 }
 
 .chip-more-toggle {
@@ -338,7 +340,7 @@ fieldset legend {
   right: 16px;
   bottom: 16px;
   background: var(--ink);
-  color: #fff;
+  color: var(--panel);
   padding: 12px 16px;
   border-radius: 8px;
   text-align: center;
