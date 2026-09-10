@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Pin flow mock</title>
+<style>
+  :root {
+    --bg:#f4f0e8; --ink:#1a1a1a; --muted:#7a7468; --line:#d9d2c2;
+    --card:#fffaf0; --accent:#c14a2b; --accent-soft:#f3d8ce;
+    --ok:#2e7d4f; --warn:#d99a1a; --bad:#c14a2b;
+    --shadow:0 8px 24px rgba(0,0,0,.12);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    overflow:hidden;touch-action:manipulation}
+  .stage{position:fixed;inset:0;display:flex;flex-direction:column}
+  .topbar{padding:10px 14px;border-bottom:1px solid var(--line);background:var(--card);
+    display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:14px}
+  .hint{font-size:11px;color:var(--muted);font-weight:500}
+  .plan{flex:1;position:relative;overflow:hidden;background:
+    repeating-linear-gradient(0deg,transparent 0 39px,rgba(0,0,0,.04) 39px 40px),
+    repeating-linear-gradient(90deg,transparent 0 39px,rgba(0,0,0,.04) 39px 40px),#ece5d3}
+  .room{position:absolute;border:2px solid #8a8170;background:rgba(255,255,255,.4)}
+  .r1{left:8%;top:10%;width:40%;height:35%}
+  .r2{left:52%;top:10%;width:40%;height:35%}
+  .r3{left:8%;top:52%;width:84%;height:38%}
+  .label{position:absolute;font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.05em;text-transform:uppercase}
+
+  /* Pins */
+  .pin{position:absolute;width:34px;height:34px;border-radius:50%;
+    transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;
+    color:#fff;font-weight:700;font-size:13px;box-shadow:var(--shadow);
+    border:3px solid #fff;cursor:pointer;transition:transform .15s}
+  .pin:active{transform:translate(-50%,-50%) scale(.9)}
+  .pin.unclass{background:#9a9486;border-style:dashed;border-color:#fffaf0}
+  .pin.sev1{background:#7fb285;outline:3px solid #7fb28533}
+  .pin.sev2{background:var(--warn);outline:3px solid #d99a1a33}
+  .pin.sev3{background:var(--bad);outline:3px solid #c14a2b33}
+  .pin .badge{position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:50%;
+    background:#fffaf0;color:var(--accent);font-size:11px;display:flex;align-items:center;justify-content:center;
+    border:1.5px solid var(--accent);font-weight:800}
+
+  /* Bottom sheet */
+  .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--card);
+    border-top-left-radius:18px;border-top-right-radius:18px;
+    box-shadow:0 -10px 30px rgba(0,0,0,.18);
+    transform:translateY(100%);transition:transform .25s cubic-bezier(.2,.8,.2,1);
+    padding:8px 16px 22px;z-index:10;max-height:78vh;overflow-y:auto}
+  .sheet.open{transform:translateY(0)}
+  .grab{width:38px;height:4px;background:var(--line);border-radius:2px;margin:6px auto 12px}
+  .sheet-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .sheet-title{font-weight:700;font-size:16px}
+  .sheet-sub{font-size:12px;color:var(--muted)}
+  .row{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--line)}
+  .row:first-of-type{border-top:none}
+  .row .k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
+    width:78px;font-weight:600;flex-shrink:0}
+  .row .v{flex:1;display:flex;flex-wrap:wrap;gap:6px}
+  .chip{padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:#fff;
+    font-size:13px;font-weight:500;cursor:pointer}
+  .chip.on{background:var(--ink);color:#fffaf0;border-color:var(--ink)}
+  .chip.sev1.on{background:var(--ok);border-color:var(--ok)}
+  .chip.sev2.on{background:var(--warn);border-color:var(--warn)}
+  .chip.sev3.on{background:var(--bad);border-color:var(--bad)}
+  .photoBtn{display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:10px;
+    background:var(--accent-soft);color:var(--accent);border:none;font-weight:600;font-size:13px;cursor:pointer}
+  .actions{display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+  .ghost{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:6px}
+  .primary{background:var(--ink);color:#fffaf0;border:none;padding:10px 18px;border-radius:10px;
+    font-weight:600;font-size:14px;cursor:pointer}
+
+  /* Toolbar */
+  .toolbar{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);
+    display:flex;gap:8px;background:var(--card);padding:8px;border-radius:14px;box-shadow:var(--shadow);
+    z-index:5;border:1px solid var(--line)}
+  .tool{width:42px;height:42px;border-radius:10px;border:none;background:transparent;
+    font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .tool.active{background:var(--ink);color:#fffaf0}
+
+  .toast{position:fixed;top:64px;left:50%;transform:translateX(-50%);
+    background:var(--ink);color:#fffaf0;padding:8px 14px;border-radius:8px;font-size:13px;
+    opacity:0;transition:opacity .2s;z-index:20;pointer-events:none}
+  .toast.show{opacity:1}
+
+  .legend{position:absolute;top:10px;right:10px;background:rgba(255,250,240,.92);
+    padding:8px 10px;border-radius:8px;font-size:10px;color:var(--muted);
+    border:1px solid var(--line);line-height:1.5}
+  .legend b{color:var(--ink)}
+  .legend .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="topbar">
+    <div>Mock — Pin flow concept</div>
+    <div class="hint">Tap plan to drop · tap pin to edit</div>
+  </div>
+  <div class="plan" id="plan">
+    <div class="room r1"></div><div class="label" style="left:10%;top:11%">Lobby</div>
+    <div class="room r2"></div><div class="label" style="left:54%;top:11%">Office</div>
+    <div class="room r3"></div><div class="label" style="left:10%;top:53%">Open floor</div>
+
+    <div class="legend">
+      <div><span class="dot" style="background:#9a9486"></span>Unclassified</div>
+      <div><span class="dot" style="background:#7fb285"></span>Low</div>
+      <div><span class="dot" style="background:#d99a1a"></span>Medium</div>
+      <div><span class="dot" style="background:#c14a2b"></span>High</div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <button class="tool active" title="Pin">📍</button>
+    <button class="tool" title="Draw">✏️</button>
+    <button class="tool" title="Camera">📷</button>
+    <button class="tool" title="Undo">↶</button>
+    <button class="tool" title="More">⋯</button>
+  </div>
+</div>
+
+<div class="sheet" id="sheet">
+  <div class="grab"></div>
+  <div class="sheet-head">
+    <div>
+      <div class="sheet-title" id="sheetTitle">Pin #1</div>
+      <div class="sheet-sub" id="sheetSub">Tap fields in any order · auto-saves</div>
+    </div>
+    <button class="ghost" onclick="closeSheet()">Done</button>
+  </div>
+
+  <div class="row">
+    <div class="k">Surface</div>
+    <div class="v" id="surfRow"></div>
+  </div>
+  <div class="row">
+    <div class="k">Descriptor</div>
+    <div class="v" id="descRow"></div>
+  </div>
+  <div class="row">
+    <div class="k">Severity</div>
+    <div class="v" id="sevRow">
+      <button class="chip sev1" data-sev="1">Low</button>
+      <button class="chip sev2" data-sev="2">Medium</button>
+      <button class="chip sev3" data-sev="3">High</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="k">Photos</div>
+    <div class="v">
+      <button class="photoBtn">📷 Add photo</button>
+      <span class="sheet-sub" id="photoCount">0</span>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="ghost" onclick="deletePin()">🗑 Delete pin</button>
+    <button class="primary" onclick="closeSheet()">Next pin</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SURFACES = ['Floor','Wall','Ceiling','Door','Window','Other'];
+const DESCRIPTORS = {
+  Floor:['Crack','Spall','Stain','Settlement','Joint'],
+  Wall:['Crack','Stain','Bulge','Paint','Hole'],
+  Ceiling:['Stain','Crack','Sag','Tile'],
+  Door:['Damage','Misalign','Hardware'],
+  Window:['Crack','Seal','Frame'],
+  Other:['Custom']
+};
+
+let pins = [];
+let active = null;
+let lastSurface = 'Floor';
+
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.classList.add('show');
+  clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),1400);
+}
+
+document.getElementById('plan').addEventListener('click',(e)=>{
+  if(e.target.classList.contains('pin')) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const x = ((e.clientX-rect.left)/rect.width)*100;
+  const y = ((e.clientY-rect.top)/rect.height)*100;
+  const pin = {id:Date.now(),num:pins.length+1,x,y,surface:lastSurface,descriptor:null,severity:0,photos:0};
+  pins.push(pin);
+  render();
+  openPin(pin);
+  showToast('Pin dropped · '+lastSurface);
+});
+
+function render(){
+  document.querySelectorAll('.pin').forEach(n=>n.remove());
+  const plan = document.getElementById('plan');
+  pins.forEach(p=>{
+    const el=document.createElement('div');
+    const sev = p.severity;
+    const cls = sev===0 ? 'unclass' : (sev===1?'sev1':sev===2?'sev2':'sev3');
+    el.className='pin '+cls;
+    el.style.left=p.x+'%';el.style.top=p.y+'%';
+    el.textContent=p.num;
+    if(!p.descriptor) el.innerHTML+='<div class="badge">!</div>';
+    el.addEventListener('click',(e)=>{e.stopPropagation();openPin(p);});
+    plan.appendChild(el);
+  });
+}
+
+function openPin(p){
+  active=p;
+  document.getElementById('sheetTitle').textContent='Pin #'+p.num;
+  document.getElementById('photoCount').textContent=p.photos+' photo'+(p.photos===1?'':'s');
+  // surface chips
+  const sr=document.getElementById('surfRow');sr.innerHTML='';
+  SURFACES.forEach(s=>{
+    const c=document.createElement('button');c.className='chip'+(p.surface===s?' on':'');
+    c.textContent=s;c.onclick=()=>{p.surface=s;lastSurface=s;p.descriptor=null;openPin(p);render();};
+    sr.appendChild(c);
+  });
+  // desc chips
+  const dr=document.getElementById('descRow');dr.innerHTML='';
+  (DESCRIPTORS[p.surface]||[]).forEach(d=>{
+    const c=document.createElement('button');c.className='chip'+(p.descriptor===d?' on':'');
+    c.textContent=d;c.onclick=()=>{p.descriptor=d;openPin(p);render();};
+    dr.appendChild(c);
+  });
+  // sev chips
+  document.querySelectorAll('#sevRow .chip').forEach(c=>{
+    c.classList.toggle('on', +c.dataset.sev===p.severity);
+    c.onclick=()=>{p.severity=+c.dataset.sev;openPin(p);render();};
+  });
+  document.getElementById('sheet').classList.add('open');
+}
+function closeSheet(){document.getElementById('sheet').classList.remove('open');active=null;}
+function deletePin(){if(!active)return;pins=pins.filter(p=>p!==active);pins.forEach((p,i)=>p.num=i+1);render();closeSheet();}
+</script>
+</body>
+</html>
