@@ -139,6 +139,25 @@ label {
   letter-spacing: 0.03em;
 }
 
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
 input[type="text"],
 input[type="tel"],
 input[type="email"],

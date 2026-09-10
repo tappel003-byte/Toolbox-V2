@@ -13,9 +13,14 @@ let ocrRanOnce = false;
 
 const els = {
   address: document.getElementById('f-address'),
-  names: document.getElementById('f-names'),
-  phone: document.getElementById('f-phone'),
+  primaryName: document.getElementById('f-primary-name'),
+  secondName: document.getElementById('f-second-name'),
+  cellPhone: document.getElementById('f-cell-phone'),
   email: document.getElementById('f-email'),
+  billingSame: document.getElementById('f-billing-same'),
+  billingAddressWrap: document.getElementById('f-billing-address-wrap'),
+  billingAddress: document.getElementById('f-billing-address'),
+  secondAddress: document.getElementById('f-second-address'),
   inspector: document.getElementById('f-inspector'),
   date: document.getElementById('f-date'),
   notes: document.getElementById('f-notes'),
@@ -156,6 +161,14 @@ els.btnAddRoom.addEventListener('click', () => {
   addRoom('');
   renderRoomsList();
 });
+
+// ---- customer contact ----
+
+function renderBillingAddressField() {
+  els.billingAddressWrap.style.display = els.billingSame.checked ? 'none' : '';
+}
+
+els.billingSame.addEventListener('change', renderBillingAddressField);
 
 // ---- plan photo + front door marker ----
 
@@ -319,9 +332,13 @@ els.form.addEventListener('submit', async (evt) => {
   const job = {
     address,
     people: {
-      names: els.names.value.trim(),
-      phone: els.phone.value.trim(),
+      primaryName: els.primaryName.value.trim(),
+      secondName: els.secondName.value.trim(),
+      cellPhone: els.cellPhone.value.trim(),
       email: els.email.value.trim(),
+      billingSameAsSite: els.billingSame.checked,
+      billingAddress: els.billingSame.checked ? '' : els.billingAddress.value.trim(),
+      secondAddress: els.secondAddress.value.trim(),
     },
     inspector: els.inspector.value.trim(),
     date: els.date.value,
@@ -355,9 +372,15 @@ async function loadExistingJob() {
   if (!job) return;
 
   els.address.value = job.address || '';
-  els.names.value = (job.people && job.people.names) || '';
-  els.phone.value = (job.people && job.people.phone) || '';
-  els.email.value = (job.people && job.people.email) || '';
+  const people = job.people || {};
+  els.primaryName.value = people.primaryName || '';
+  els.secondName.value = people.secondName || '';
+  els.cellPhone.value = people.cellPhone || '';
+  els.email.value = people.email || '';
+  els.billingSame.checked = people.billingSameAsSite !== false;
+  els.billingAddress.value = people.billingAddress || '';
+  els.secondAddress.value = people.secondAddress || '';
+  renderBillingAddressField();
   els.inspector.value = job.inspector || '';
   els.date.value = job.date || '';
   els.notes.value = job.notes || '';

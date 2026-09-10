@@ -8,7 +8,7 @@ function formatUpdated(ts) {
 
 function jobSummaryLine(job) {
   const parts = [];
-  if (job.people && job.people.names) parts.push(job.people.names);
+  if (job.people && job.people.primaryName) parts.push(job.people.primaryName);
   if (job.rooms && job.rooms.length) parts.push(`${job.rooms.length} room${job.rooms.length === 1 ? '' : 's'}`);
   if (job.updatedAt) parts.push(`updated ${formatUpdated(job.updatedAt)}`);
   return parts.join(' · ');

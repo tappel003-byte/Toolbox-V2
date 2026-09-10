@@ -5,6 +5,18 @@ This is a plan, not a change. Nothing in this file has been applied to
 Survey). Neither app has been touched. Do not apply any of this without
 Tim listing the exact change first.
 
+## Standing rule: customer contact info lives solely in Toolbox
+
+Tim: any customer contact information — billing address, a second
+address, spouse/second name, email, cell phone, etc. — is entered once,
+in Toolbox V2's Customer Contact section, and nowhere else. It
+propagates out to drawers as needed; drawers don't collect or ask for
+it themselves. This sits alongside the existing rule for plan photo /
+rooms / front door: the cabinet is the one place any of this is typed
+in. `job.people` now carries `primaryName`, `secondName`, `cellPhone`,
+`email`, `billingSameAsSite`, `billingAddress`, `secondAddress` — see
+`job.html` / `js/job.js`.
+
 ## What exists today (confirmed)
 
 **Distress Survey** (`field-reporter-pro`)
