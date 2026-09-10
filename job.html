@@ -71,9 +71,32 @@
     </fieldset>
 
     <fieldset class="section-gap">
-      <legend>Rooms</legend>
-      <div id="room-list" class="stack"></div>
-      <button type="button" id="btn-add-room" class="btn" style="margin-top:10px;">+ Add Room</button>
+      <legend>Building Type</legend>
+      <select id="f-building-type">
+        <option value="residential" selected>Residential</option>
+        <option value="office">Office</option>
+        <option value="medical">Medical Office</option>
+        <option value="vet">Vet Clinic</option>
+        <option value="dental">Dental</option>
+        <option value="warehouse">Warehouse</option>
+      </select>
+      <div class="hint">Sets which rooms show up as quick-tap chips and what "Read labels" hunts for.</div>
+    </fieldset>
+
+    <fieldset class="section-gap">
+      <legend>Rooms <span id="rooms-status" class="hint" style="display:inline;"></span></legend>
+
+      <div id="room-chips" class="chip-row"></div>
+
+      <div id="room-list" class="stack" style="margin-top:10px;"></div>
+      <button type="button" id="btn-add-room" class="btn" style="margin-top:10px;">+ Add Custom Room</button>
+
+      <div class="row" style="margin-top:10px;">
+        <button type="button" id="btn-ocr-scan" class="btn" disabled>🔍 Read labels</button>
+        <button type="button" id="btn-ocr-more" class="btn" style="display:none;">➕ Find more</button>
+      </div>
+      <div id="ocr-message" class="hint" style="display:none;"></div>
+      <div class="hint">"Read labels" reads printed room names off the plan photo — free, runs on the phone. Rooms it finds are placed on the plan; tap "+ Add Custom Room" for anything it misses.</div>
     </fieldset>
 
     <fieldset class="section-gap">
@@ -118,6 +141,7 @@
 <div id="toast" class="toast"></div>
 
 <script src="js/db.js"></script>
+<script src="js/room-ocr.js"></script>
 <script src="js/job.js"></script>
 </body>
 </html>
