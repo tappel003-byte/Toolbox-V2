@@ -17,58 +17,6 @@ in. `job.people` now carries `primaryName`, `secondName`, `cellPhone`,
 `email`, `billingSameAsSite`, `billingAddress`, `secondAddress` — see
 `job.html` / `js/job.js`.
 
-## Architecture shift: shared backend, not local-only (in progress)
-
-Tim: this isn't a one-off. Report Builder builds on Distress Survey's
-output, something builds on Floor Survey's, Diagnostics may feed the
-report too, and he may have ~10 customer files open in Toolbox at once
-across devices — plus all photos need to actually live on a server
-(Cloudflare) until downloaded to his own server or Google Drive. Local
-IndexedDB on one phone can't satisfy that: a customer entered in
-Toolbox has to be visible from Distress Survey (and any other drawer),
-regardless of device.
-
-**Done:**
-- **Cloudflare D1** database `toolbox-v2` (id
-  `236b342f-3738-4d65-a29f-152836d513e0`) holds the shared customer
-  roster — `customers`, `rooms` tables, created.
-- **Cloudflare R2 bucket** `toolbox-v2-photos` — approved and created,
-  bound to the Worker as `PHOTOS`.
-- **The Worker API** (`worker/src/index.js`) — list/get/put/delete a
-  customer, plus `PUT`/`GET /api/customers/:id/photo` actually storing
-  and serving plan-photo bytes from R2. Written, **not deployed**.
-- **The frontend sync layer** (`js/sync.js`) — write-through, offline-
-  first: every save goes to the local pocket first (always works), then
-  tries the API. No signal or the API errors → the job is marked
-  `pending` and both the job screen and the home list retry
-  automatically the moment the browser's `online` event fires, no user
-  action needed. Home list cards show a small badge (✓ Synced /
-  ⏳ Pending sync / 📱 On device only). Tested against a mocked API
-  (route-intercepted, not the real deployed Worker) for all three
-  states: save-while-down → pending, reconnect → syncs, badge updates.
-  Caught and fixed a real bug in the process — a new job's in-memory
-  `existingKey` wasn't updating after its first save, so retry-on-
-  reconnect silently no-op'd on that same screen until a reload.
-- Every save still writes to `sandia-job-pocket` first, unconditionally
-  — the local write is not gated on the network call succeeding.
-
-**Still open — points at the same two blockers as before:**
-1. **Deploying the Worker.** Code is done; nothing has run
-   `wrangler deploy` against it. Needs Tim to run that one command from
-   `worker/` (or hand this session a Cloudflare API token). Until then
-   `js/sync.js`'s `API_BASE` stays empty and every job is correctly
-   `offline-only` — that's not a bug, it's what "not deployed yet"
-   should look like.
-2. **Access control.** Once deployed, the Worker's URL has no auth —
-   full read/write to every customer record and photo for anyone who
-   finds it. Needs at least a shared access key before a real device
-   points at it. Still open: does anyone besides Tim need their own
-   login (e.g. Lee), which is a bigger lift than one shared key.
-3. **Home screen framing** — Tim's mental model (first screen = the
-   customer roster) is close to what `index.html` already is; worth
-   revisiting copy/ordering once there's a real multi-customer list
-   from the live API to look at, rather than guessing ahead of it.
-
 ## What exists today (confirmed)
 
 **Distress Survey** (`field-reporter-pro`)
