@@ -17,6 +17,52 @@ in. `job.people` now carries `primaryName`, `secondName`, `cellPhone`,
 `email`, `billingSameAsSite`, `billingAddress`, `secondAddress` — see
 `job.html` / `js/job.js`.
 
+## Architecture shift: shared backend, not local-only (in progress)
+
+Tim: this isn't a one-off. Report Builder builds on Distress Survey's
+output, something builds on Floor Survey's, Diagnostics may feed the
+report too, and he may have ~10 customer files open in Toolbox at once
+across devices — plus all photos need to actually live on a server
+(Cloudflare) until downloaded to his own server or Google Drive. Local
+IndexedDB on one phone can't satisfy that: a customer entered in
+Toolbox has to be visible from Distress Survey (and any other drawer),
+regardless of device.
+
+**Direction, now underway:**
+- **Cloudflare D1** database `toolbox-v2` (id
+  `236b342f-3738-4d65-a29f-152836d513e0`) holds the shared customer
+  roster — created, schema in place (`customers`, `rooms` tables).
+- **A Cloudflare Worker** (`worker/src/index.js`) is the API in front
+  of it: list/get/put/delete a customer. Written, not deployed yet —
+  see `worker/README.md` for exactly what's missing (deploy access, an
+  access key, and why deploy can't happen from this session).
+- **R2 bucket for photos is blocked.** Creating it was refused by a
+  "modify shared resources" permission gate — it touches the same
+  Cloudflare account as Tim's other live sites, so it needs his
+  explicit approval. Nothing to do here until that's granted.
+- **IndexedDB becomes the offline cache, not the source of truth.**
+  Once the Worker is live, `js/db.js` should write through to the API
+  when online and fall back to the local copy when there's no signal
+  — this is what keeps the "basement with no signal" case working
+  while still giving every device the same roster. **Not built yet** —
+  today `js/db.js` still only writes locally. This is the next real
+  chunk of work, and it touches the save/load path on every screen, so
+  it's being called out here rather than done silently.
+- **Home screen framing.** Tim's mental model: Toolbox's first screen
+  is fundamentally a customer-contact roster (list + "add a customer"),
+  which is close to what `index.html` already is — worth confirming
+  the framing (copy, ordering) matches once the backend is live and
+  there's a real multi-customer list to look at.
+
+**Open, needs Tim:**
+1. Approve R2 bucket creation (`toolbox-v2-photos`) so photo bytes have
+   somewhere to live.
+2. A way to deploy the Worker — either Tim running `wrangler deploy`
+   from `worker/` once, or a Cloudflare API token this session can use.
+3. Access control: single shared key for now, or does anyone besides
+   Tim need their own login (e.g. Lee)? Changes how much auth work this
+   needs before it's safe to point a real device at it.
+
 ## What exists today (confirmed)
 
 **Distress Survey** (`field-reporter-pro`)

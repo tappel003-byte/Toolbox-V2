@@ -1,0 +1,16 @@
+{
+  "name": "toolbox-v2-api",
+  "main": "src/index.js",
+  "compatibility_date": "2025-06-05",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "toolbox-v2",
+      "database_id": "236b342f-3738-4d65-a29f-152836d513e0"
+    }
+  ]
+  // R2 bucket binding goes here once the bucket is approved and created:
+  // "r2_buckets": [
+  //   { "binding": "PHOTOS", "bucket_name": "toolbox-v2-photos" }
+  // ]
+}
