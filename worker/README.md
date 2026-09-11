@@ -16,9 +16,13 @@ only knowing about what's in its own local storage.
   - `PUT /api/customers/:id` — create or update (id must be the
     normalized address — same scheme as the local pocket's `addressKey`).
   - `DELETE /api/customers/:id`
-  - `POST`/`GET /api/customers/:id/photo` — **stubs**, return 501. Photo
-    bytes need an R2 bucket, which is blocked pending approval (see
-    `../docs/PUNCHLIST.md`).
+  - `PUT /api/customers/:id/photo` — upload the plan photo (raw body,
+    `Content-Type` header carries the mime type). Stores the bytes in
+    the `toolbox-v2-photos` R2 bucket at `customers/<id>/plan` and
+    updates the customer's `plan_photo_key`/`plan_photo_type`.
+  - `GET /api/customers/:id/photo` — streams the plan photo back.
+- **R2 bucket** `toolbox-v2-photos` — created, bound to this Worker as
+  `PHOTOS` in `wrangler.jsonc`.
 
 ## What's NOT done
 
@@ -28,19 +32,15 @@ only knowing about what's in its own local storage.
    needs to happen from wherever Tim can run one command, or by
    granting deploy access some other way.
 2. **No auth.** Once deployed, this Worker's URL is a public API with
-   full read/write access to every customer record. That's acceptable
-   for now only because nothing points at it yet. It needs at least a
-   shared access key (a header this Worker checks) before any real
-   device calls it.
-3. **No photo storage.** R2 bucket creation was blocked by a "modify
-   shared resources" permission gate — it touches the same Cloudflare
-   account as Tim's other live sites, so it needs his explicit
-   approval, not mine to grant myself.
-4. **Nothing reads from this yet.** Toolbox V2's `js/db.js` still only
-   writes to local IndexedDB. Wiring it (and eventually the drawer
-   copies) to read/write through this API instead — while keeping
-   IndexedDB as the offline fallback — is the next real chunk of work.
-   See `../docs/PUNCHLIST.md` for the plan.
+   full read/write access to every customer record and photo. That's
+   acceptable for now only because nothing points at it yet. It needs
+   at least a shared access key (a header this Worker checks) before
+   any real device calls it.
+3. **Frontend doesn't call this yet.** `js/db.js`/`js/sync.js` write
+   through to this API when online and fall back to local IndexedDB
+   when offline — see `../docs/PUNCHLIST.md` for the sync design — but
+   it's pointed at an empty `API_BASE` until the Worker is actually
+   deployed and that URL is filled in.
 
 ## Deploying (once ready)
 

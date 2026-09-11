@@ -17,10 +17,11 @@
 // before this is pointed at from a real device. Don't wire a drawer to
 // this without adding that first.
 //
-// Photos: this Worker only stores metadata (a `plan_photo_key` string) —
-// actual photo bytes belong in an R2 bucket, which hasn't been created
-// yet (blocked pending approval — see docs/PUNCHLIST.md). The photo
-// endpoints below are stubs until that exists.
+// Photos: D1 stores metadata (`plan_photo_key` / `plan_photo_type`);
+// the actual bytes live in the `PHOTOS` R2 bucket (toolbox-v2-photos),
+// one object per customer at key `customers/<id>/plan`. A newer plan
+// photo overwrites the same key — no history, matching how the local
+// pocket already treats it (one plan image per job).
 
 function normalizeAddress(address) {
   return String(address || '')
@@ -151,6 +152,37 @@ async function deleteCustomer(db, id) {
   return json({ ok: true });
 }
 
+function photoKey(id) {
+  return `customers/${id}/plan`;
+}
+
+async function putPhoto(db, bucket, id, request) {
+  const exists = await db.prepare(`SELECT id FROM customers WHERE id = ?`).bind(id).first();
+  if (!exists) return notFound();
+
+  const contentType = request.headers.get('Content-Type') || 'application/octet-stream';
+  const key = photoKey(id);
+  await bucket.put(key, request.body, { httpMetadata: { contentType } });
+  await db
+    .prepare(`UPDATE customers SET plan_photo_key = ?, plan_photo_type = ?, updated_at = ? WHERE id = ?`)
+    .bind(key, contentType, Date.now(), id)
+    .run();
+
+  return json({ ok: true, key, contentType });
+}
+
+async function getPhoto(bucket, id) {
+  const obj = await bucket.get(photoKey(id));
+  if (!obj) return notFound();
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': obj.httpMetadata?.contentType || 'application/octet-stream',
+      'Cache-Control': 'private, max-age=0, must-revalidate',
+      ...CORS_HEADERS,
+    },
+  });
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') {
@@ -163,6 +195,7 @@ export default {
     if (parts[0] !== 'api' || parts[1] !== 'customers') return notFound();
 
     const db = env.DB;
+    const photos = env.PHOTOS;
 
     // /api/customers
     if (parts.length === 2) {
@@ -174,10 +207,10 @@ export default {
 
     // /api/customers/:id/photo
     if (parts.length === 4 && parts[3] === 'photo') {
-      return json(
-        { error: 'Photo storage is not configured yet (R2 bucket pending approval — see docs/PUNCHLIST.md).' },
-        501
-      );
+      if (!photos) return json({ error: 'Photo storage (R2) is not bound on this Worker.' }, 501);
+      if (request.method === 'PUT') return putPhoto(db, photos, id, request);
+      if (request.method === 'GET') return getPhoto(photos, id);
+      return json({ error: 'Method not allowed' }, 405);
     }
 
     // /api/customers/:id
