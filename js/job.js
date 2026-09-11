@@ -2,7 +2,7 @@
 // This is the only screen that writes into sandia-job-pocket.
 
 const params = new URLSearchParams(location.search);
-const existingKey = params.get('job');
+let existingKey = params.get('job'); // reassigned after a new job's first save — see submit handler
 
 let planBlob = null;      // File/Blob currently attached to this job
 let planObjectUrl = null; // object URL for previewing planBlob
@@ -40,7 +40,17 @@ const els = {
   doorMarkerStatus: document.getElementById('door-marker-status'),
   form: document.getElementById('job-form'),
   btnDelete: document.getElementById('btn-delete'),
+  syncStatus: document.getElementById('sync-status'),
 };
+
+function renderSyncStatus(status) {
+  const text = {
+    synced: '✓ Synced to the cloud.',
+    pending: '⏳ Saved on this device — will sync when back online.',
+    'offline-only': '📱 Saved on this device only (cloud sync not set up yet).',
+  }[status] || '';
+  els.syncStatus.textContent = text;
+}
 
 function showToast(msg) {
   const t = document.getElementById('toast');
@@ -358,8 +368,16 @@ els.form.addEventListener('submit', async (evt) => {
     showToast('Job saved.');
     if (!existingKey) {
       history.replaceState(null, '', `job.html?job=${encodeURIComponent(saved.addressKey)}`);
+      existingKey = saved.addressKey;
       els.btnDelete.style.display = '';
     }
+    // The local save above always succeeds, signal or not. This is a
+    // best-effort extra: try the cloud now, but the job is already safe
+    // either way, and js/sync.js retries on its own once online.
+    renderSyncStatus('pending');
+    const status = await syncJob(saved);
+    await updateSyncStatus(saved.addressKey, status);
+    renderSyncStatus(status);
   } catch (err) {
     showToast(`Could not save: ${err.message || err}`);
   }
@@ -406,7 +424,18 @@ async function loadExistingJob() {
   doorMarker = (job.frontDoor && job.frontDoor.marker) || null;
   renderDoorMarker();
 
+  renderSyncStatus(job.syncStatus || 'pending');
   els.btnDelete.style.display = '';
 }
 
 loadExistingJob();
+
+// If this job was saved while offline, retry the moment signal comes back.
+window.addEventListener('online', async () => {
+  if (!existingKey) return;
+  const job = await getJob(existingKey);
+  if (!job || job.syncStatus === 'synced') return;
+  const status = await syncJob(job);
+  await updateSyncStatus(existingKey, status);
+  renderSyncStatus(status);
+});

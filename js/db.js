@@ -64,6 +64,25 @@ async function getAllJobs() {
   });
 }
 
+// Patches just the sync status, without bumping updatedAt — a background
+// sync retry succeeding shouldn't silently reorder the home list.
+async function updateSyncStatus(addressKey, syncStatus) {
+  const db = await openJobPocket();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(JOBS_STORE, 'readwrite');
+    const store = tx.objectStore(JOBS_STORE);
+    const req = store.get(addressKey);
+    req.onsuccess = () => {
+      const record = req.result;
+      if (!record) return resolve(null);
+      record.syncStatus = syncStatus;
+      store.put(record);
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 async function deleteJob(addressKey) {
   const db = await openJobPocket();
   return new Promise((resolve, reject) => {

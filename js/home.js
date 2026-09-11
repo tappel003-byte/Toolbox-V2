@@ -14,6 +14,11 @@ function jobSummaryLine(job) {
   return parts.join(' · ');
 }
 
+function syncBadge(job) {
+  const label = { synced: '✓ Synced', pending: '⏳ Pending sync', 'offline-only': '📱 On device only' }[job.syncStatus] || '⏳ Pending sync';
+  return `<span class="sync-badge sync-badge-${escapeHtml(job.syncStatus || 'pending')}">${label}</span>`;
+}
+
 async function renderJobList() {
   const listEl = document.getElementById('job-list');
   let jobs = [];
@@ -38,7 +43,7 @@ async function renderJobList() {
     a.href = `job.html?job=${encodeURIComponent(job.addressKey)}`;
     a.innerHTML = `
       <div class="address">${escapeHtml(job.address || '(no address)')}</div>
-      <div class="meta">${escapeHtml(jobSummaryLine(job))}</div>
+      <div class="meta">${escapeHtml(jobSummaryLine(job))} ${syncBadge(job)}</div>
     `;
     listEl.appendChild(a);
   }
@@ -51,3 +56,8 @@ function escapeHtml(s) {
 }
 
 renderJobList();
+
+// Best-effort background sync sweep, then refresh the badges if anything
+// changed. Never blocks the initial render — jobs show up locally first.
+trySyncPendingJobs().then(renderJobList);
+window.addEventListener('online', () => { trySyncPendingJobs().then(renderJobList); });
