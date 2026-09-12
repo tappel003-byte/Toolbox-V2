@@ -40,7 +40,12 @@ const els = {
   doorMarkerStatus: document.getElementById('door-marker-status'),
   form: document.getElementById('job-form'),
   btnDelete: document.getElementById('btn-delete'),
+  backLink: document.getElementById('back-link'),
 };
+
+if (existingKey) {
+  els.backLink.href = `customer.html?job=${encodeURIComponent(existingKey)}`;
+}
 
 function showToast(msg) {
   const t = document.getElementById('toast');
@@ -355,11 +360,7 @@ els.form.addEventListener('submit', async (evt) => {
 
   try {
     const saved = await saveJob(job);
-    showToast('Job saved.');
-    if (!existingKey) {
-      history.replaceState(null, '', `job.html?job=${encodeURIComponent(saved.addressKey)}`);
-      els.btnDelete.style.display = '';
-    }
+    location.href = `customer.html?job=${encodeURIComponent(saved.addressKey)}`;
   } catch (err) {
     showToast(`Could not save: ${err.message || err}`);
   }

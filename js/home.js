@@ -8,7 +8,7 @@ function formatUpdated(ts) {
 
 function jobSummaryLine(job) {
   const parts = [];
-  if (job.people && job.people.primaryName) parts.push(job.people.primaryName);
+  if (job.address) parts.push(job.address);
   if (job.rooms && job.rooms.length) parts.push(`${job.rooms.length} room${job.rooms.length === 1 ? '' : 's'}`);
   if (job.updatedAt) parts.push(`updated ${formatUpdated(job.updatedAt)}`);
   return parts.join(' · ');
@@ -33,11 +33,12 @@ async function renderJobList() {
 
   listEl.innerHTML = '';
   for (const job of jobs) {
+    const name = (job.people && job.people.primaryName) || '(no name yet)';
     const a = document.createElement('a');
     a.className = 'card job-card';
-    a.href = `job.html?job=${encodeURIComponent(job.addressKey)}`;
+    a.href = `customer.html?job=${encodeURIComponent(job.addressKey)}`;
     a.innerHTML = `
-      <div class="address">${escapeHtml(job.address || '(no address)')}</div>
+      <div class="address">${escapeHtml(name)}</div>
       <div class="meta">${escapeHtml(jobSummaryLine(job))}</div>
     `;
     listEl.appendChild(a);

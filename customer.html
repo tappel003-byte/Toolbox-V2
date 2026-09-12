@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#f4f0e8">
+<title>Toolbox</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<header class="app-bar">
+  <a class="back" href="index.html">‹ Cabinet</a>
+  <h1 id="customer-title">Customer</h1>
+  <span></span>
+</header>
+
+<main>
+  <div class="card section-gap">
+    <div class="address" id="customer-address"></div>
+    <div class="meta" id="customer-meta"></div>
+  </div>
+
+  <div class="stack section-gap">
+    <div class="drawer-grid">
+      <button type="button" class="drawer-btn" disabled>Distress Survey<span class="sub">coming soon</span></button>
+      <button type="button" class="drawer-btn" disabled>Floor Survey<span class="sub">coming soon</span></button>
+      <button type="button" class="drawer-btn" disabled>Diagnostics<span class="sub">coming soon</span></button>
+      <button type="button" class="drawer-btn" disabled>Report Builder<span class="sub">coming soon</span></button>
+    </div>
+    <div class="hint">Drawers open with this customer's file already loaded, once they're wired up. Not yet.</div>
+  </div>
+
+  <div class="stack section-gap">
+    <a class="btn" id="btn-edit-info" href="#">Edit Customer Info</a>
+  </div>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script src="js/db.js"></script>
+<script src="js/customer.js"></script>
+</body>
+</html>
