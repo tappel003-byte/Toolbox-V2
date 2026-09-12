@@ -40,12 +40,16 @@
 </header>
 
 <main>
-  <div class="hint" style="margin-bottom:14px;">Read-only — everything here comes straight from Distress Survey. To fix a description, a pin number, or delete a pin, edit it there; this updates automatically.</div>
+  <div class="hint" style="margin-bottom:14px;">Read-only — everything here comes straight from the drawers. To fix a description, a pin number, or delete a pin, edit it at the source; this updates automatically.</div>
+  <div class="stack section-gap">
+    <button type="button" id="btn-export-pdf" class="btn btn-primary" disabled>Export PDF</button>
+  </div>
   <div id="report-body"><!-- filled by js/report.js --></div>
 </main>
 
 <div id="toast" class="toast"></div>
 
+<script src="js/vendor/jspdf.umd.min.js"></script>
 <script src="js/db.js"></script>
 <script src="js/report.js"></script>
 </body>
