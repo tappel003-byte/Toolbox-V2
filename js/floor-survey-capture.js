@@ -6,10 +6,22 @@
 // correctly in Diagnostics' 3D view or Report Builder's H/L/Δ — both
 // already read job.floorSurvey generically.
 //
-// v1 scope, on purpose: no transitions, no exclusions, no scale
-// calibration, and native capture always creates its OWN new floor rather
-// than adding points to an already-imported one (avoids ambiguous shared
-// ownership of a floor's boundary/plan across two very different sources).
+// v1 scope, on purpose: no exclusions, no scale calibration, and native
+// capture always creates its OWN new floor rather than adding points to
+// an already-imported one (avoids ambiguous shared ownership of a floor's
+// boundary/plan across two very different sources). Flooring transitions
+// ARE supported — real, shipped correction math (js/floor-survey-math.js)
+// already consumes them, so skipping capture here would leave a floor
+// with an actual material change (e.g. hardwood -> tile at a doorway)
+// silently reporting a wrong H/L/Δ.
+
+// Real vocabulary from floor/src/lib/transitions.ts's COMMON_SURFACES —
+// kept identical rather than invented, so a surface name here means the
+// same thing it would in the real app.
+const FS_COMMON_SURFACES = [
+  'Tile', 'Hardwood', 'Engineered wood', 'Laminate', 'LVP', 'Vinyl sheet',
+  'Linoleum', 'Concrete/slab', 'Carpet/slab', 'Subfloor', 'Carpet/subfloor', 'Other',
+];
 
 let fsJob = null;
 let fsJobKey = null;
@@ -39,17 +51,29 @@ function fsPoint(id) {
   return fsAllPoints().find((p) => p.id === id);
 }
 
-async function fsSave() {
-  const fresh = await getJob(fsJobKey);
-  const job = fresh || fsJob;
-  job.floorSurvey = {
-    ...(job.floorSurvey || {}),
-    floors: fsAllFloors(),
-    points: fsAllPoints(),
-    updatedAt: Date.now(),
-  };
-  await saveJob(job);
-  fsJob = job;
+// Every mutator here does read-modify-write: fetch the latest job, patch
+// in floorSurvey, write it back. Two of those overlapping (e.g. a value
+// field's blur-triggered save racing a transition tag's save fired by the
+// same interaction) can let a save built from an earlier snapshot commit
+// last, silently dropping the other's change. Queuing every fsSave() call
+// through one promise chain makes each one run to completion before the
+// next starts, which removes the interleaving entirely rather than just
+// making it less likely.
+let __fsSaveQueue = Promise.resolve();
+function fsSave() {
+  __fsSaveQueue = __fsSaveQueue.then(async () => {
+    const fresh = await getJob(fsJobKey);
+    const job = fresh || fsJob;
+    job.floorSurvey = {
+      ...(job.floorSurvey || {}),
+      floors: fsAllFloors(),
+      points: fsAllPoints(),
+      updatedAt: Date.now(),
+    };
+    await saveJob(job);
+    fsJob = job;
+  });
+  return __fsSaveQueue;
 }
 
 // ---------- Floor management ----------
@@ -66,10 +90,12 @@ async function fsCreateFloor(name, planBlob) {
   const floors = fsAllFloors();
   floors.push(floor);
   fsJob.floorSurvey = { ...(fsJob.floorSurvey || {}), floors, points: fsAllPoints() };
-  await fsSave();
+  // Select and render before awaiting the save — see the matching comment
+  // in fsCreatePointAt for why this ordering matters.
   fsSelectedFloorId = floor.id;
   fsHideNewFloorForm();
   fsRenderAll();
+  await fsSave();
 }
 
 function fsShowNewFloorForm() {
@@ -164,6 +190,92 @@ function fsRenderEditor() {
   document.getElementById('fs-editor-title').textContent = `Point #${p.index}` + (p.isBasePoint ? ' (Base Point)' : '');
   document.getElementById('f-fs-value').value = p.value;
   document.getElementById('f-fs-label').value = p.label || '';
+  fsRenderTransitionSection(p);
+}
+
+function fsTransitionLabel(floor, id) {
+  const t = (floor.transitions || []).find((x) => x.id === id);
+  return t ? `${t.surfaceA} → ${t.surfaceB}` : null;
+}
+
+function fsRenderTransitionSection(p) {
+  const floor = fsFloor(fsSelectedFloorId);
+  const normalWrap = document.getElementById('fs-transition-normal');
+  const anchorInfo = document.getElementById('fs-transition-anchor-info');
+  const newForm = document.getElementById('fs-new-transition-form');
+  if (!floor) return;
+
+  if (p.isTransitionAnchor) {
+    normalWrap.style.display = 'none';
+    newForm.style.display = 'none';
+    const t = (floor.transitions || []).find((x) => x.id === p.transitionId);
+    anchorInfo.style.display = 'block';
+    anchorInfo.textContent = t
+      ? `Doorway anchor: ${t.surfaceA} → ${t.surfaceB} (B reading ${t.readingB.toFixed(2)}")`
+      : 'Doorway anchor (transition record missing)';
+    return;
+  }
+
+  anchorInfo.style.display = 'none';
+  normalWrap.style.display = 'block';
+  newForm.style.display = 'none';
+  const sel = document.getElementById('f-fs-transition');
+  const options = ['<option value="">— none —</option>', '<option value="__new__">+ New transition anchor here</option>']
+    .concat((floor.transitions || []).map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.surfaceA)} → ${escapeHtml(t.surfaceB)}</option>`));
+  sel.innerHTML = options.join('');
+  sel.value = p.transitionId || '';
+}
+
+function fsPopulateSurfaceSelect(sel) {
+  sel.innerHTML = FS_COMMON_SURFACES.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+}
+
+async function fsHandleTransitionSelectChange(value) {
+  const p = fsPoint(fsSelectedPointId);
+  if (!p) return;
+  if (value === '__new__') {
+    document.getElementById('fs-new-transition-form').style.display = 'block';
+    fsPopulateSurfaceSelect(document.getElementById('f-fs-surface-a'));
+    fsPopulateSurfaceSelect(document.getElementById('f-fs-surface-b'));
+    document.getElementById('f-fs-surface-a-other').style.display = 'none';
+    document.getElementById('f-fs-surface-b-other').style.display = 'none';
+    document.getElementById('f-fs-reading-b').value = '';
+    return;
+  }
+  document.getElementById('fs-new-transition-form').style.display = 'none';
+  p.transitionId = value || undefined;
+  p.isTransitionAnchor = false;
+  await fsSave();
+  fsRenderPointList();
+}
+
+async function fsCreateTransition() {
+  const p = fsPoint(fsSelectedPointId);
+  const floor = fsFloor(fsSelectedFloorId);
+  if (!p || !floor) return;
+  const selA = document.getElementById('f-fs-surface-a');
+  const selB = document.getElementById('f-fs-surface-b');
+  const surfaceA = selA.value === 'Other' ? document.getElementById('f-fs-surface-a-other').value.trim() : selA.value;
+  const surfaceB = selB.value === 'Other' ? document.getElementById('f-fs-surface-b-other').value.trim() : selB.value;
+  const readingB = parseFloat(document.getElementById('f-fs-reading-b').value);
+  if (!surfaceA || !surfaceB) { showToast('Enter both surfaces'); return; }
+  if (isNaN(readingB)) { showToast('Enter a reading for the B side'); return; }
+
+  const t = {
+    id: 'trans_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    x: p.x, y: p.y,
+    surfaceA, surfaceB,
+    readingA: p.value,
+    readingB,
+    createdAt: Date.now(),
+  };
+  floor.transitions = floor.transitions || [];
+  floor.transitions.push(t);
+  p.isTransitionAnchor = true;
+  p.transitionId = t.id;
+  await fsSave();
+  fsRenderEditor();
+  fsRenderPointList();
 }
 
 function fsRenderPointList() {
@@ -174,11 +286,21 @@ function fsRenderPointList() {
     list.innerHTML = '<div class="hint" style="margin:0;">No points yet — finish the boundary, then tap inside it to drop one.</div>';
     return;
   }
-  list.innerHTML = points.map((p) => `
+  list.innerHTML = points.map((p) => {
+    let extra = '';
+    if (p.isTransitionAnchor) {
+      const label = fsTransitionLabel(floor, p.transitionId);
+      extra = label ? ` · anchor (${escapeHtml(label)})` : ' · anchor';
+    } else if (p.transitionId) {
+      const label = fsTransitionLabel(floor, p.transitionId);
+      if (label) extra = ` · via ${escapeHtml(label)}`;
+    }
+    return `
     <div class="fs-point-row${p.id === fsSelectedPointId ? ' selected' : ''}" data-id="${escapeHtml(p.id)}">
       <div class="fs-badge${p.isBasePoint ? ' base' : ''}">${escapeHtml(String(p.index))}</div>
-      <div class="fs-meta">${p.value.toFixed(2)}"${p.label ? ' · ' + escapeHtml(p.label) : ''}</div>
-    </div>`).join('');
+      <div class="fs-meta">${p.value.toFixed(2)}"${p.label ? ' · ' + escapeHtml(p.label) : ''}${extra}</div>
+    </div>`;
+  }).join('');
   list.querySelectorAll('.fs-point-row').forEach((row) => {
     row.addEventListener('click', () => fsSelectPoint(row.getAttribute('data-id')));
   });
@@ -218,9 +340,14 @@ async function fsCreatePointAt(floor, x, y) {
   const points = fsAllPoints();
   points.push(point);
   fsJob.floorSurvey = { ...(fsJob.floorSurvey || {}), points };
-  await fsSave();
-  fsSelectPoint(point.id);
+  // Select and render before awaiting the save — a fast follow-up edit
+  // (typing a value, tagging a transition) must never land on a stale
+  // fsSelectedPointId from the brief window while the write is in flight.
+  fsSelectedPointId = point.id;
+  fsRenderOverlay();
+  fsRenderEditor();
   fsRenderPointList();
+  await fsSave();
 }
 
 function fsHandlePlanClick(e) {
@@ -369,6 +496,14 @@ async function loadFloorSurveyCapture() {
   document.getElementById('f-fs-value').addEventListener('change', fsSaveValue);
   document.getElementById('f-fs-label').addEventListener('input', (e) => fsUpdateLabelLocal(e.target.value));
   document.getElementById('f-fs-label').addEventListener('change', fsSaveLabel);
+  document.getElementById('f-fs-transition').addEventListener('change', (e) => fsHandleTransitionSelectChange(e.target.value));
+  document.getElementById('f-fs-surface-a').addEventListener('change', (e) => {
+    document.getElementById('f-fs-surface-a-other').style.display = e.target.value === 'Other' ? 'block' : 'none';
+  });
+  document.getElementById('f-fs-surface-b').addEventListener('change', (e) => {
+    document.getElementById('f-fs-surface-b-other').style.display = e.target.value === 'Other' ? 'block' : 'none';
+  });
+  document.getElementById('btn-fs-create-transition').addEventListener('click', fsCreateTransition);
 
   if (!fsNativeFloors().length) {
     fsShowNewFloorForm();

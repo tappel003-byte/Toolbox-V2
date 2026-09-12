@@ -410,3 +410,45 @@ customer.html is now a real screen, none are "coming soon" placeholders.
   instead of silently creating a bad point, the first point on a floor
   becomes its base point, value/label persist across reload, and the
   import/native coexistence case above.
+
+## Flooring-transition capture added — and a real save-race bug found doing it
+
+Floor Survey's real, shipped correction math (already consumed by
+Diagnostics and Report Builder) had no way to be *created* natively:
+without this, a floor with an actual material change at a doorway
+(hardwood → tile) would silently report a wrong H/L/Δ once captured
+through the native screen instead of imported. Added it: mark a point as
+a transition anchor with a real surface pair from
+`floor/src/lib/transitions.ts`'s own `COMMON_SURFACES` list (kept
+identical, not invented) and a B-side reading, then tag later points to
+that transition so their raw reading gets corrected automatically.
+
+**Verifying it with a real 3-point scenario surfaced an actual
+concurrency bug, not a test-flakiness issue — worth recording in detail
+because it's the kind of bug that would have shipped silently.** Every
+`fsSave()`/`dsSave()` call is a read-modify-write: fetch the latest job
+record, patch in this screen's own data, write it back — the same
+pattern used throughout this session to safely coexist with other
+screens' concurrent edits. But a single user action can trigger *two* of
+these concurrently (e.g. selecting a transition from the dropdown blurs
+the value field first, firing its own save, while the select's own
+`change` fires a second save). Two overlapping `fsSave()` calls can
+finish in either order; whichever's `saveJob()` commits *last* wins,
+and if that one was built from an earlier `getJob()` snapshot, it can
+silently overwrite the other's change. Reproduced this deterministically
+(100% of runs) with a real 3-point transition scenario before fixing it —
+and confirmed by instrumenting that naive `console.log` tracing perturbed
+the timing enough to hide it again, which is why it wasn't caught by eye
+the first time.
+
+**Fix:** queue every `fsSave()`/`dsSave()` call through one promise
+chain (`js/floor-survey-capture.js`, `js/distress-survey.js`), so each
+read-modify-write runs to completion before the next one starts. This
+removes the interleaving entirely rather than making it merely less
+likely — verified with 5 consecutive clean runs of the exact scenario
+that failed 100% of the time before the fix, plus the full regression
+suite. The same two files also had a smaller, related ordering bug on
+their own: `fsSelectedPointId`/`fsSelectedFloorId`/`dsSelectedId` were
+being set *after* awaiting the save instead of before, leaving a real
+window where a fast follow-up edit could target a stale selection or
+silently no-op. Fixed alongside the queue.

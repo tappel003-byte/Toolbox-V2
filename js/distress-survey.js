@@ -15,16 +15,25 @@ function dsPins() {
   return (dsJob.distressSurvey && dsJob.distressSurvey.pins) || [];
 }
 
-async function dsSave() {
-  const fresh = await getJob(dsJobKey);
-  const job = fresh || dsJob;
-  job.distressSurvey = {
-    ...(job.distressSurvey || {}),
-    pins: dsPins(),
-    updatedAt: Date.now(),
-  };
-  await saveJob(job);
-  dsJob = job;
+// Queued for the same reason as Floor Survey's fsSave (see its comment):
+// this is a read-modify-write, and two overlapping calls (e.g. a
+// description's blur-triggered save racing a type-toggle's save fired by
+// the same click) can let a save built from an earlier snapshot commit
+// last, silently dropping the other's change.
+let __dsSaveQueue = Promise.resolve();
+function dsSave() {
+  __dsSaveQueue = __dsSaveQueue.then(async () => {
+    const fresh = await getJob(dsJobKey);
+    const job = fresh || dsJob;
+    job.distressSurvey = {
+      ...(job.distressSurvey || {}),
+      pins: dsPins(),
+      updatedAt: Date.now(),
+    };
+    await saveJob(job);
+    dsJob = job;
+  });
+  return __dsSaveQueue;
 }
 
 function dsNextPinNumber() {
@@ -142,8 +151,13 @@ async function dsCreatePinAt(x, y) {
   const pins = dsPins();
   pins.push(pin);
   dsJob.distressSurvey = { ...(dsJob.distressSurvey || {}), pins };
+  // Select and render before awaiting the save — a fast follow-up action
+  // (typing a description, tapping the toggle) must never land on a stale
+  // dsSelectedId from the brief window while the IndexedDB write is still
+  // in flight.
+  dsSelectedId = pin.id;
+  dsRenderAll();
   await dsSave();
-  dsSelectPin(pin.id);
 }
 
 async function dsSetType(type) {

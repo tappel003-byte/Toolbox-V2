@@ -98,6 +98,30 @@
           <input type="text" id="f-fs-label" placeholder="e.g. NW corner">
         </div>
       </div>
+      <div id="fs-transition-normal" style="margin-top:10px;">
+        <label for="f-fs-transition">Doorway transition</label>
+        <select id="f-fs-transition"></select>
+      </div>
+      <div id="fs-transition-anchor-info" class="hint" style="margin-top:10px;display:none;"></div>
+      <div id="fs-new-transition-form" style="display:none;margin-top:10px;">
+        <div class="row">
+          <div>
+            <label for="f-fs-surface-a">Surface here (A)</label>
+            <select id="f-fs-surface-a"></select>
+            <input type="text" id="f-fs-surface-a-other" placeholder="Custom surface" style="display:none;margin-top:6px;">
+          </div>
+          <div>
+            <label for="f-fs-surface-b">Surface across doorway (B)</label>
+            <select id="f-fs-surface-b"></select>
+            <input type="text" id="f-fs-surface-b-other" placeholder="Custom surface" style="display:none;margin-top:6px;">
+          </div>
+        </div>
+        <div style="margin-top:10px;">
+          <label for="f-fs-reading-b">Reading on the B side</label>
+          <input type="number" id="f-fs-reading-b" step="0.01">
+        </div>
+        <button type="button" id="btn-fs-create-transition" class="btn btn-primary" style="margin-top:10px;">Create Transition</button>
+      </div>
       <div class="row" style="margin-top:10px;">
         <button type="button" id="btn-fs-delete" class="btn btn-danger">Delete Point</button>
       </div>
