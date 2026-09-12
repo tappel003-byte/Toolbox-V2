@@ -47,19 +47,6 @@ if (existingKey) {
   els.backLink.href = `customer.html?job=${encodeURIComponent(existingKey)}`;
 }
 
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 1800);
-}
-
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s == null ? '' : String(s);
-  return d.innerHTML;
-}
-
 function showOcrMessage(text) {
   els.ocrMessage.textContent = text;
   els.ocrMessage.style.display = text ? '' : 'none';

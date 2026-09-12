@@ -4,12 +4,6 @@
 
 let allJobs = [];
 
-function formatUpdated(ts) {
-  if (!ts) return '';
-  const d = new Date(ts);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
 function jobSummaryLine(job) {
   const parts = [];
   if (job.address) parts.push(job.address);
@@ -68,12 +62,6 @@ async function renderJobList() {
 
   allJobs.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   renderList();
-}
-
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s == null ? '' : String(s);
-  return d.innerHTML;
 }
 
 document.getElementById('f-search').addEventListener('input', renderList);

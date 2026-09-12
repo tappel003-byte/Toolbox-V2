@@ -4,12 +4,6 @@
 // just renders whatever's currently imported. Fix it at the source, it
 // shows up here automatically.
 
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s == null ? '' : String(s);
-  return d.innerHTML;
-}
-
 // ---- Floor Survey transition corrections ----
 // Ported from floor/src/lib/transitions.ts (real Floor Survey source) rather
 // than reimplemented from scratch — this has to match exactly, or Report
@@ -76,7 +70,7 @@ function renderFloorSurveySection(job) {
   return `
     <div style="font-weight:700;margin-bottom:8px;">Floor Survey — Elevation Summary</div>
     ${cards}
-    <div class="hint" style="margin-top:2px;margin-bottom:18px;">imported ${new Date(fs.importedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+    <div class="hint" style="margin-top:2px;margin-bottom:18px;">imported ${formatUpdated(fs.importedAt)}</div>
   `;
 }
 
@@ -111,7 +105,7 @@ function renderPinScheduleSection(job) {
       </thead>
       <tbody>${rows}</tbody>
     </table>
-    <div class="hint" style="margin-top:10px;">${pins.length} pin${pins.length === 1 ? '' : 's'} · imported ${new Date(ds.importedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+    <div class="hint" style="margin-top:10px;">${pins.length} pin${pins.length === 1 ? '' : 's'} · imported ${formatUpdated(ds.importedAt)}</div>
   `;
 }
 

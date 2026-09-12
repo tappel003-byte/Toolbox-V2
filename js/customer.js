@@ -10,30 +10,11 @@ let audioChunks = [];
 let recordStartMs = 0;
 const clipObjectUrls = {}; // clip.id -> object URL, so we can revoke on re-render
 
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s == null ? '' : String(s);
-  return d.innerHTML;
-}
-
-function formatUpdated(ts) {
-  if (!ts) return '';
-  const d = new Date(ts);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
 function formatDuration(sec) {
   const s = Math.max(0, Math.round(sec || 0));
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${String(r).padStart(2, '0')}`;
-}
-
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 1800);
 }
 
 async function loadCustomer() {
