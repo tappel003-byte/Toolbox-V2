@@ -6,18 +6,30 @@ const JOB_POCKET_DB = 'sandia-job-pocket';
 const JOB_POCKET_VERSION = 1;
 const JOBS_STORE = 'jobs';
 
+// Every getJob/saveJob/etc. call used to open a brand-new IDBDatabase
+// connection and never close it — a real connection leak on any long
+// session with a lot of edits. Caching one shared connection promise
+// means every caller reuses the same open connection instead of piling
+// up new ones.
+let __jobPocketPromise = null;
 function openJobPocket() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(JOB_POCKET_DB, JOB_POCKET_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(JOBS_STORE)) {
-        db.createObjectStore(JOBS_STORE, { keyPath: 'addressKey' });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+  if (!__jobPocketPromise) {
+    __jobPocketPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(JOB_POCKET_DB, JOB_POCKET_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(JOBS_STORE)) {
+          db.createObjectStore(JOBS_STORE, { keyPath: 'addressKey' });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => {
+        __jobPocketPromise = null;
+        reject(req.error);
+      };
+    });
+  }
+  return __jobPocketPromise;
 }
 
 // Normalize an address into a stable lookup key: lowercase, collapse

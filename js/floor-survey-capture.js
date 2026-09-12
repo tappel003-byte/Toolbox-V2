@@ -53,27 +53,32 @@ function fsPoint(id) {
   return fsAllPoints().find((p) => p.id === id);
 }
 
-// Every mutator here does read-modify-write: fetch the latest job, patch
-// in floorSurvey, write it back. Two of those overlapping (e.g. a value
-// field's blur-triggered save racing a transition tag's save fired by the
-// same interaction) can let a save built from an earlier snapshot commit
-// last, silently dropping the other's change. Queuing every fsSave() call
-// through one promise chain makes each one run to completion before the
-// next starts, which removes the interleaving entirely rather than just
-// making it less likely.
+// fsJob is loaded once at page load and every mutator below patches it
+// in place (fsAllFloors()/fsAllPoints() always return references into
+// the SAME live fsJob.floorSurvey, never a copy) — so fsJob is always the
+// complete, current, correct state for this screen's own data, no re-read
+// needed. An earlier version re-fetched the job from IndexedDB on every
+// single save to protect against another screen's concurrent edit to a
+// field this screen doesn't own; in practice that turned the save into a
+// read-modify-write, and two of those firing from one interaction (e.g. a
+// value field's blur-triggered save racing a transition tag's own save)
+// could let a save built from an earlier snapshot commit last, silently
+// dropping the other's change — reproduced deterministically, and still
+// residually raceable under heavy load even after queuing/coalescing the
+// calls. Writing the live fsJob directly removes the read side of that
+// race entirely: every save is unconditionally built from the one
+// ever-current object, so there is no earlier snapshot left to overwrite
+// with. Still queued so rapid saves don't pile up redundant writes.
 let __fsSaveQueue = Promise.resolve();
 function fsSave() {
   __fsSaveQueue = __fsSaveQueue.then(async () => {
-    const fresh = await getJob(fsJobKey);
-    const job = fresh || fsJob;
-    job.floorSurvey = {
-      ...(job.floorSurvey || {}),
+    fsJob.floorSurvey = {
+      ...(fsJob.floorSurvey || {}),
       floors: fsAllFloors(),
       points: fsAllPoints(),
       updatedAt: Date.now(),
     };
-    await saveJob(job);
-    fsJob = job;
+    await saveJob(fsJob);
   });
   return __fsSaveQueue;
 }
@@ -607,5 +612,21 @@ async function loadFloorSurveyCapture() {
     fsRenderAll();
   }
 }
+
+// A save fired by the click that's navigating away (e.g. a value field's
+// blur-triggered save right before the back link is clicked) can still be
+// mid-flight — its IndexedDB transaction not yet committed — when the page
+// starts unloading, silently dropping that edit. Same bug class fixed
+// earlier this session for voice memo recording (customer.js): intercept
+// every link click, wait for whatever's currently queued in __fsSaveQueue
+// (already-resolved if nothing is pending, so this costs nothing when
+// idle), then navigate manually.
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('a[href]');
+  if (!link) return;
+  e.preventDefault();
+  const destination = link.href;
+  __fsSaveQueue.then(() => { location.href = destination; });
+}, true);
 
 loadFloorSurveyCapture();

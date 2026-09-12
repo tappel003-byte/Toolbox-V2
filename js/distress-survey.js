@@ -15,23 +15,27 @@ function dsPins() {
   return (dsJob.distressSurvey && dsJob.distressSurvey.pins) || [];
 }
 
-// Queued for the same reason as Floor Survey's fsSave (see its comment):
-// this is a read-modify-write, and two overlapping calls (e.g. a
-// description's blur-triggered save racing a type-toggle's save fired by
-// the same click) can let a save built from an earlier snapshot commit
-// last, silently dropping the other's change.
+// dsJob is loaded once at page load and every mutator below patches it in
+// place (dsPins() always returns a reference into the SAME live
+// dsJob.distressSurvey, never a copy) — so dsJob is always the complete,
+// current state for this screen's own data, no re-read needed. See the
+// matching, more detailed comment on Floor Survey's fsSave: re-fetching
+// on every save turned it into a read-modify-write, and two overlapping
+// saves from one interaction could let an earlier snapshot commit last
+// and silently drop the other's change — reproduced deterministically,
+// and still residually raceable under heavy load even after queuing the
+// calls. Writing the live dsJob directly removes the read side of the
+// race entirely. Still queued so rapid saves don't pile up redundant
+// writes.
 let __dsSaveQueue = Promise.resolve();
 function dsSave() {
   __dsSaveQueue = __dsSaveQueue.then(async () => {
-    const fresh = await getJob(dsJobKey);
-    const job = fresh || dsJob;
-    job.distressSurvey = {
-      ...(job.distressSurvey || {}),
+    dsJob.distressSurvey = {
+      ...(dsJob.distressSurvey || {}),
       pins: dsPins(),
       updatedAt: Date.now(),
     };
-    await saveJob(job);
-    dsJob = job;
+    await saveJob(dsJob);
   });
   return __dsSaveQueue;
 }
@@ -292,5 +296,17 @@ async function loadDistressSurvey() {
     if (file) dsAddPhoto(file);
   });
 }
+
+// Same fix as Floor Survey's matching guard (see its comment): a save
+// fired by the very click that's navigating away can still be mid-flight
+// when the page starts unloading. Intercept every link click, wait for
+// whatever's currently queued in __dsSaveQueue, then navigate manually.
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('a[href]');
+  if (!link) return;
+  e.preventDefault();
+  const destination = link.href;
+  __dsSaveQueue.then(() => { location.href = destination; });
+}, true);
 
 loadDistressSurvey();

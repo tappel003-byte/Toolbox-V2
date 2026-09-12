@@ -86,7 +86,27 @@ function renderPinScheduleSection(job) {
   `;
 }
 
-function buildReportPdf(job) {
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+// jsPDF's addImage() needs an explicit format matching the actual image
+// data — pass the wrong one and it can render blank or throw. Camera
+// photos are virtually always JPEG; fall back to it for anything jsPDF
+// doesn't have a direct format name for rather than guessing wrong.
+function jsPdfImageFormat(mimeType) {
+  const type = (mimeType || '').toLowerCase();
+  if (type.includes('png')) return 'PNG';
+  if (type.includes('webp')) return 'WEBP';
+  return 'JPEG';
+}
+
+async function buildReportPdf(job) {
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF({ unit: 'in', format: [11, 17], orientation: 'landscape' });
   const pageW = pdf.internal.pageSize.getWidth();
@@ -190,6 +210,50 @@ function buildReportPdf(job) {
     });
   }
 
+  // Photo appendix — only pins with real attached Blobs have anything to
+  // show here. Imported pins carry photoNumbers (a reference to a separate
+  // physical photo folder from the old app), never the actual image, so
+  // there's nothing to embed for them; that's correct, not a gap.
+  const pinsWithPhotos = ds && ds.pins ? ds.pins.filter((p) => p.photos && p.photos.length).sort((a, b) => a.pin - b.pin) : [];
+  if (pinsWithPhotos.length) {
+    const thumb = 2.3;
+    const gap = 0.25;
+    const perRow = Math.max(1, Math.floor((pageW - margin * 2 + gap) / (thumb + gap)));
+    pdf.addPage([11, 17], 'landscape');
+    y = margin + 0.65;
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(12);
+    pdf.setTextColor(20);
+    pdf.text('Distress Survey — Photos', margin, y);
+    y += 0.3;
+    let col = 0;
+    for (const p of pinsWithPhotos) {
+      for (const photo of p.photos) {
+        if (y + thumb + 0.3 > pageH - margin) {
+          pdf.addPage([11, 17], 'landscape');
+          y = margin + 0.65;
+          col = 0;
+        }
+        const x = margin + col * (thumb + gap);
+        try {
+          const dataUrl = await blobToDataUrl(photo);
+          pdf.addImage(dataUrl, jsPdfImageFormat(photo.type), x, y, thumb, thumb, undefined, 'FAST');
+        } catch (err) {
+          // A malformed or unsupported image shouldn't sink the whole
+          // export — draw an empty frame and keep going.
+          pdf.setDrawColor(200);
+          pdf.rect(x, y, thumb, thumb);
+        }
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(9);
+        pdf.setTextColor(20);
+        pdf.text(`Pin #${p.pin}`, x, y + thumb + 0.15);
+        col += 1;
+        if (col >= perRow) { col = 0; y += thumb + 0.35; }
+      }
+    }
+  }
+
   // Now that total page count is known, stamp headers on every page.
   const totalPages = pdf.internal.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
@@ -243,10 +307,15 @@ async function loadReport() {
 
   const exportBtn = document.getElementById('btn-export-pdf');
   exportBtn.disabled = false;
-  exportBtn.addEventListener('click', () => {
-    const pdf = buildReportPdf(job);
-    const slug = (name || 'report').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    pdf.save(`${slug}-report.pdf`);
+  exportBtn.addEventListener('click', async () => {
+    exportBtn.disabled = true;
+    try {
+      const pdf = await buildReportPdf(job);
+      const slug = (name || 'report').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      pdf.save(`${slug}-report.pdf`);
+    } finally {
+      exportBtn.disabled = false;
+    }
   });
 }
 

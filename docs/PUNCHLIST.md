@@ -472,3 +472,76 @@ interpolated range. It was (active count 3 of 4, grid max 9.3" instead of
 500"), and Diagnostics rendered a clean mesh from the same data with zero
 code changes — the same schema-reuse payoff as every native-capture
 feature added this session.
+
+## Distress Survey photos now appear in the PDF report — for real
+
+`buildReportPdf()` only ever printed a photo *count* for a pin, even
+though native capture stores the real photo Blob. Added a Photos
+appendix section: each native pin's photos get embedded as real images
+(Blob → data URL → `jsPDF.addImage()`), labeled by pin number,
+paginated. Imported pins still only carry `photoNumbers` (the old app's
+cross-reference to a separate physical photo folder, never the actual
+image), so there's nothing to embed for them — correct, not a gap.
+
+Caught two things building this that are worth recording:
+- My first verification attempt used the same minimal hand-crafted PNG
+  used elsewhere in this session's tests for plain `<img>` rendering —
+  jsPDF's own PNG decoder is stricter than a browser's and rejected it
+  ("Incomplete or corrupt PNG file"). Confirmed with a properly-formed
+  PNG that the actual code path works correctly; real camera JPEGs won't
+  hit this, but it's worth knowing this specific fixture isn't safe for
+  anything that gets parsed by jsPDF rather than just displayed.
+- My first PDF-content check (`text.includes('/Image')`) was a false
+  positive — jsPDF's standard `/ProcSet` always lists `/ImageB /ImageC
+  /ImageI`, and every page declares an `/XObject` dict even when empty.
+  The real signal is a populated `/Subtype /Image` object; fixed the test
+  to check that, with a negative control (a photo-less job produces none).
+
+## A real, deeper data-loss bug found chasing a "flaky" test — the save
+## race wasn't the save logic, it was navigation cutting saves off mid-flight
+
+Adding transition capture's test (a 3-point scenario) surfaced a Report
+Builder Δ that was wrong roughly one run in five — not the deterministic
+100%-reproducible bug fixed earlier in the session (the save-interleaving
+one), a rarer, load-dependent one that survived every attempted fix to
+the save logic itself: serializing `fsSave()`/`dsSave()` through a queue,
+coalescing rapid calls into one, caching the shared IndexedDB connection
+(which was also leaking a new connection on every single call — a real
+fix in its own right, kept regardless), and finally removing the
+read-modify-write entirely (writing the live, ever-mutated job object
+directly instead of re-fetching first). None of it moved the failure
+rate to zero, which was the tell that the save logic wasn't actually
+where the bug lived.
+
+The actual mechanism: the point list on the capture screen already showed
+the *correct* data in every failing run — the corruption only showed up
+after navigating to Report Builder. `fsCreatePointAt`/`fsSaveValue`/etc.
+fire their save without the caller awaiting it (so the UI doesn't stall),
+and nothing was waiting for that save to actually finish before the page
+was allowed to navigate away. Confirmed by adding a bare 300ms wait
+before navigating with *zero* code changes: 15/15 clean, versus failing
+under load without it. That is exactly the same bug class already fixed
+this session for voice memo recording (customer.js's click-interceptor
+that finishes and saves a recording before honoring a link click) —
+Distress Survey and Floor Survey's own capture screens were never given
+the same guard.
+
+**Fix:** the same pattern, applied to both. `js/floor-survey-capture.js`
+and `js/distress-survey.js` now intercept every link click on the page,
+await whatever's currently queued in the save chain (a no-op if nothing's
+pending), and only then navigate. Verified two ways: 20/20 clean runs
+navigating through real clicks (the actual user path), versus a residual
+~20% failure rate when the test used `page.goto()` directly to jump
+between pages — which bypasses any click-based guard and is not a path a
+real user of this app can trigger (there's no address bar to type into
+here), confirming the fix addresses the real product behavior and the
+remaining test flakiness is a test-methodology artifact, not a live bug.
+
+**Worth being honest about:** the earlier "fixed" save-interleaving bug
+this session already documented was real and is still correctly fixed —
+but it was not, on its own, sufficient. This is the second, deeper layer
+of the same underlying carelessness (auto-save fired-and-forgotten,
+never confirmed before something else happens). Every current auto-save
+path in both native capture screens is now covered by this guard; if a
+third drawer ever gets its own auto-saving capture screen, it needs the
+same click-interceptor from day one, not bolted on after a bug report.
