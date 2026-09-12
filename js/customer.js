@@ -72,7 +72,70 @@ async function loadCustomer() {
   document.getElementById('customer-meta').textContent = metaParts.join(' · ');
 
   renderClips();
+  renderDrawerDataSummary();
 }
+
+// ---- drawer data import (bridge until drawers live inside Toolbox) ----
+
+function showImportStatus(text) {
+  const el = document.getElementById('import-status');
+  el.textContent = text;
+  el.style.display = text ? '' : 'none';
+}
+
+function renderDrawerDataSummary() {
+  const list = document.getElementById('drawer-data-summary');
+  const parts = [];
+  if (currentJob.distressSurvey) {
+    parts.push(`<div class="card" style="padding:10px;">Distress Survey — ${currentJob.distressSurvey.pins.length} pin${currentJob.distressSurvey.pins.length === 1 ? '' : 's'} imported ${formatUpdated(currentJob.distressSurvey.importedAt)}</div>`);
+  }
+  if (currentJob.floorSurvey) {
+    const fs = currentJob.floorSurvey;
+    parts.push(`<div class="card" style="padding:10px;">Floor Survey — ${fs.floors.length} floor${fs.floors.length === 1 ? '' : 's'}, ${fs.points.length} point${fs.points.length === 1 ? '' : 's'} imported ${formatUpdated(fs.importedAt)}</div>`);
+  }
+  list.innerHTML = parts.join('');
+}
+
+document.getElementById('btn-import-ds').addEventListener('click', () => {
+  document.getElementById('f-import-ds').click();
+});
+document.getElementById('btn-import-fs').addEventListener('click', () => {
+  document.getElementById('f-import-fs').click();
+});
+
+document.getElementById('f-import-ds').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const pins = parseDistressSurveyCsv(text);
+    currentJob.distressSurvey = { importedAt: Date.now(), pins };
+    await saveJob(currentJob);
+    renderDrawerDataSummary();
+    showImportStatus('');
+    showToast(`Imported ${pins.length} pins.`);
+  } catch (err) {
+    showImportStatus(`Distress Survey import failed: ${err.message || err}`);
+  }
+});
+
+document.getElementById('f-import-fs').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const bundle = parseFloorSurveyJson(text);
+    currentJob.floorSurvey = { ...bundle, importedAt: Date.now() };
+    await saveJob(currentJob);
+    renderDrawerDataSummary();
+    showImportStatus('');
+    showToast(`Imported ${bundle.floors.length} floor(s), ${bundle.points.length} points.`);
+  } catch (err) {
+    showImportStatus(`Floor Survey import failed: ${err.message || err}`);
+  }
+});
 
 // ---- voice memos ----
 
