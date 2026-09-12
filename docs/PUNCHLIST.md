@@ -305,3 +305,70 @@ transition corrections before building the surface.
   without mutating stored data (checked byte-for-byte), PNG export
   produces a real image, and the friendly "need at least 3 points" /
   "boundary missing" messages match Floor Survey's own.
+
+## Distress Survey — first native drawer build (no longer import-only)
+
+Distress Survey is now a live drawer with its own capture screen
+(`distress-survey.html` / `js/distress-survey.js`), not just the CSV
+import bridge. This is the first of the two "sacred cow" drawers actually
+rebuilt inside Toolbox — Floor Survey's own native capture is still ahead.
+
+- **Direction is computed, never typed.** `js/distress-math.js` ports
+  `pinCardinal()`/`_orientationOffset()`/`_originXY()` from the real
+  `distress/survey.html` verbatim (cross-checked against `_rvPointToPlan()`
+  to confirm both apps store front-door/pin coordinates as the same 0-1
+  fraction, so the port only drops survey.html's own pixel-to-fraction
+  division — the bearing math itself is untouched). A pin's compass
+  direction comes straight from where you tapped relative to the front
+  door set in job setup, same as the real app.
+- **v1 is the core loop, not full parity, on purpose.** Tap to drop a pin,
+  interior/exterior, room (picked from the room list already captured in
+  setup — real survey.html's OCR-based auto-room-guess wasn't ported this
+  pass), description, real attached photos. Not carried over: photo
+  annotation/strokes, the photo viewer, project-level internal/external
+  "mode", and the whole trash/backup/export-reminder system — all
+  superseded by Toolbox's own job pocket and cabinet, which already do
+  that job at the customer level instead of per-survey.
+- **Real photos replace the old photo-number placeholder.** The CSV
+  bridge's pins carry a `photoNumbers` text range because that format
+  cross-references a separate folder of camera-roll photos; native
+  capture stores the actual photo as a Blob (same pattern as voice
+  memos), so that whole numbering-reservation scheme doesn't apply and
+  wasn't ported. Report Builder shows whichever the pin actually has
+  (`photoNumbers` for imported pins, a real "N photo(s)" count for
+  native ones).
+- **Import and native capture coexist safely — found and fixed two real
+  bugs getting there, not assumed.** Testing the two mechanisms together
+  (not just each alone) surfaced actual data-loss and numbering-collision
+  bugs before they could ship:
+  - The CSV import handler used to replace `job.distressSurvey` wholesale.
+    Once native pins could exist in the same job, that would silently
+    wipe them on any re-import. Fixed: every pin is tagged
+    `origin: 'native'` or `'import'`; import now only replaces
+    `'import'`-tagged pins and always keeps `'native'` ones (editing an
+    imported pin from the native screen re-tags it `'native'` too, so a
+    touched-up import survives a later re-import as well).
+  - Pin numbers aren't interchangeable: an imported pin's number matches
+    a physical photo print from the old app and must never move, while a
+    native pin has no such paper trail and is safe to renumber. So on
+    import, a colliding native pin number gets bumped to the next free
+    slot — the import's own numbers are never touched. Verified with a
+    constructed collision (native pin captured as #1, then a CSV
+    imported whose own pins are also numbered 1/2/4/5) rather than
+    assumed to be fine.
+  - Also decided against the real app's own behavior of renumbering all
+    remaining pins sequentially after a delete — that's fine in
+    survey.html where every pin comes from the same source, but here it
+    would drag imported pin numbers out from under their photo prints.
+    Deleting a pin now just retires its number; gaps are normal (the real
+    sample export itself skips pin 3).
+  - Saving the description field on every keystroke (the first draft)
+    would have let overlapping async saves interleave and drop text —
+    the same class of bug fixed earlier in job.js's edit form. Fixed
+    before it shipped: local state updates live, the actual save only
+    fires on blur.
+- Verified end to end: empty state with no plan photo, direction computed
+  correctly against a known front-door facing, room/type/description/photo
+  all persist across reload, delete doesn't renumber survivors, the
+  import/native collision case above, and Report Builder rendering both
+  pin sources correctly in one schedule.

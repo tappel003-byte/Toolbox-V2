@@ -35,6 +35,21 @@ function renderFloorSurveySection(job) {
   `;
 }
 
+// Pins can come from the CSV import bridge (photoNumbers, a text range) or
+// from native capture (real photos.length) — show whichever this pin has.
+function pinPhotoLabel(p) {
+  if (p.photoNumbers) return p.photoNumbers;
+  const n = (p.photos || []).length;
+  return n ? `${n} photo${n === 1 ? '' : 's'}` : '';
+}
+
+// A distressSurvey can hold imported pins, natively-captured pins, or both.
+// updatedAt (set whenever native capture saves) means "this isn't just an
+// old import" — prefer it so fresh field data is never mislabeled as stale.
+function distressSurveyDateLabel(ds) {
+  return ds.updatedAt ? `updated ${formatUpdated(ds.updatedAt)}` : `imported ${formatUpdated(ds.importedAt)}`;
+}
+
 function renderPinScheduleSection(job) {
   const ds = job.distressSurvey;
   if (!ds || !ds.pins || !ds.pins.length) return '';
@@ -45,7 +60,7 @@ function renderPinScheduleSection(job) {
     return `
       <tr>
         <td><span class="pin-badge${isExterior ? ' exterior' : ''}">${escapeHtml(String(p.pin))}</span></td>
-        <td>${escapeHtml(p.photoNumbers || '')}</td>
+        <td>${escapeHtml(pinPhotoLabel(p))}</td>
         <td>${escapeHtml(p.room || '')}</td>
         <td>${escapeHtml(p.direction || '')}</td>
         <td>${escapeHtml(p.description || '')}</td>
@@ -66,7 +81,7 @@ function renderPinScheduleSection(job) {
       </thead>
       <tbody>${rows}</tbody>
     </table>
-    <div class="hint" style="margin-top:10px;">${pins.length} pin${pins.length === 1 ? '' : 's'} · imported ${formatUpdated(ds.importedAt)}</div>
+    <div class="hint" style="margin-top:10px;">${pins.length} pin${pins.length === 1 ? '' : 's'} · ${distressSurveyDateLabel(ds)}</div>
   `;
 }
 
@@ -165,7 +180,7 @@ function buildReportPdf(job) {
       const ty = y + rowH / 2 + 0.03;
       pdf.setTextColor(30);
       pdf.text(String(p.pin), colX[0] + 0.06, ty);
-      pdf.text(p.photoNumbers || '', colX[1] + 0.06, ty);
+      pdf.text(pinPhotoLabel(p), colX[1] + 0.06, ty);
       pdf.text(p.room || '', colX[2] + 0.06, ty);
       pdf.text(p.direction || '', colX[3] + 0.06, ty);
       const noteLines = pdf.splitTextToSize(p.description || '', colNotes - 0.12).slice(0, 2);

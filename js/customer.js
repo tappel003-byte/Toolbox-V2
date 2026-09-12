@@ -30,6 +30,7 @@ async function loadCustomer() {
   editLink.href = `job.html?job=${encodeURIComponent(currentKey)}`;
   document.getElementById('drawer-report-builder').href = `report.html?job=${encodeURIComponent(currentKey)}`;
   document.getElementById('drawer-diagnostics').href = `diagnostics.html?job=${encodeURIComponent(currentKey)}`;
+  document.getElementById('drawer-distress-survey').href = `distress-survey.html?job=${encodeURIComponent(currentKey)}`;
 
   try {
     currentJob = await getJob(currentKey);
@@ -70,7 +71,9 @@ function renderDrawerDataSummary() {
   const list = document.getElementById('drawer-data-summary');
   const parts = [];
   if (currentJob.distressSurvey) {
-    parts.push(`<div class="card" style="padding:10px;">Distress Survey — ${currentJob.distressSurvey.pins.length} pin${currentJob.distressSurvey.pins.length === 1 ? '' : 's'} imported ${formatUpdated(currentJob.distressSurvey.importedAt)}</div>`);
+    const ds = currentJob.distressSurvey;
+    const dateLabel = ds.updatedAt ? `updated ${formatUpdated(ds.updatedAt)}` : `imported ${formatUpdated(ds.importedAt)}`;
+    parts.push(`<div class="card" style="padding:10px;">Distress Survey — ${ds.pins.length} pin${ds.pins.length === 1 ? '' : 's'} ${dateLabel}</div>`);
   }
   if (currentJob.floorSurvey) {
     const fs = currentJob.floorSurvey;
@@ -92,12 +95,35 @@ document.getElementById('f-import-ds').addEventListener('change', async (e) => {
   if (!file) return;
   try {
     const text = await file.text();
-    const pins = parseDistressSurveyCsv(text);
-    currentJob.distressSurvey = { importedAt: Date.now(), pins };
+    // Re-importing replaces only the previously-imported pins (a corrected
+    // export overwrites the old one); any pins captured natively in the
+    // Distress Survey drawer since then are tagged origin:'native' and are
+    // never touched by an import, so they can't be silently wiped.
+    const importedPins = parseDistressSurveyCsv(text).map((p) => ({ ...p, origin: 'import' }));
+    let nativePins = ((currentJob.distressSurvey && currentJob.distressSurvey.pins) || [])
+      .filter((p) => p.origin === 'native');
+    // Imported numbers are fixed — they match Tim's physical photo prints
+    // from the old app. A native pin created before this import could
+    // coincidentally reuse one of those numbers; if so, bump the native
+    // pin (never the import) to the next free number instead.
+    const usedNumbers = new Set(importedPins.map((p) => p.pin));
+    let nextFree = importedPins.length ? Math.max(...importedPins.map((p) => p.pin)) + 1 : 1;
+    nativePins = nativePins.map((p) => {
+      if (!usedNumbers.has(p.pin)) { usedNumbers.add(p.pin); return p; }
+      const bumped = { ...p, pin: nextFree };
+      usedNumbers.add(nextFree);
+      nextFree += 1;
+      return bumped;
+    });
+    currentJob.distressSurvey = {
+      ...(currentJob.distressSurvey || {}),
+      pins: importedPins.concat(nativePins),
+      importedAt: Date.now(),
+    };
     await saveJob(currentJob);
     renderDrawerDataSummary();
     showImportStatus('');
-    showToast(`Imported ${pins.length} pins.`);
+    showToast(`Imported ${importedPins.length} pins.`);
   } catch (err) {
     showImportStatus(`Distress Survey import failed: ${err.message || err}`);
   }
