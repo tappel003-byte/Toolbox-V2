@@ -179,3 +179,95 @@ boundary/exclusion drawing belong in the cabinet's job schema, and (b)
 the exact change to make in each app's own repo — per the hard rule,
 neither `field-reporter-pro` nor `floorplan-topo-maker` gets edited on a
 general instruction alone.
+
+## Update: verified against real exports and real source (not inference)
+
+Tim sent real Distress Survey / Floor Survey export files from real jobs
+and pushed back when a couple of things I'd said turned out to be guesses
+dressed up as fact. Re-read the actual source instead of relying on
+summarized memory of it. Corrections and confirmations below — read this
+before assuming anything about either app's data shape.
+
+**Distress Survey's real `pins.csv` schema** (verified against a real
+export, cross-checked against `survey.html`'s own export code, line ~6078):
+
+```
+Pin, Type, Description, Photo Count, Photo Numbers, Room, Direction, X, Y
+```
+
+- `Pin` — a plain sequential number. Earlier I said pin identifiers were
+  room names based on one rendered PDF that happened to display Room in
+  the pin badge instead of the number — that was wrong as a general rule.
+  Pin (number) and Room (name) are two distinct columns.
+- `Photo Numbers` — a human-readable range **string** ("2 to 3", "10 to
+  11"), not a structured list. One pin can absorb several consecutive
+  shutter presses under one description.
+- `Direction` — compass letter (N/S/E/W/etc.), **relative to the front
+  door's established orientation**, not absolute. Not something I'd seen
+  in any code I'd read before — real, exists, worth remembering.
+- `X`, `Y` — 0–1 fractions of the plan image, confirmed.
+
+**The pin-log PDF (`buildPinLogPdf()`) is only partly flattened.** The
+plan-plus-pin-dots map is a single baked PNG (`composeMapImage`) — moving
+a pin's position does need a re-export. But the Photo/#/Location/Notes
+table is real vector PDF text, rebuilt fresh from `project.pins` on every
+export — not a picture. So the "fix a typo without re-exporting" idea was
+already half-true for the text table; it's specifically pin *position on
+the map* that's baked in, not the descriptive text.
+
+**Floor Survey's real data model is considerably richer than what I'd
+described from memory.** Verified directly against `src/lib/types.ts`:
+
+- **Scale calibration already exists and ships today** — `Floor.scale =
+  { a: {x,y}, b: {x,y}, lengthInches }`. The "measure a known wall length"
+  feature Tim and I designed from scratch a few days ago, treating it as
+  a gap to fill later, is not a gap — it's already built. Diagnostics can
+  assume real-unit conversion is available now, not pending a future
+  build.
+- **`SurveyPoint.value` is already a real elevation reading in inches**
+  (instrument-calibrated), not a normalized unit. Only the `x`/`y` plan
+  position is pixel-space needing `Floor.scale` to become real feet.
+- **`TopoArea[]`** — multiple independently-named survey areas per floor,
+  each its own polygon and its own H/L/Δ stat pill position. This is the
+  real mechanism behind "several localized topo exhibits from one floor
+  plan" (confirmed against the real Vegas NM report's Figures 1–4).
+- **`Exclusion[]`** — polygon holes inside the boundary, real and typed,
+  though absent from both real export files reviewed so far (may just be
+  unused on those two jobs, not evidence the feature doesn't work).
+- **`Transition[]`** — flooring-material-change corrections at doorways
+  (e.g. Hardwood→Laminate), readings on both sides, `parentId` chaining
+  when transitions compound, and an opt-in `useGroupAverage` to apply one
+  averaged correction across every doorway of the same surface pair
+  instead of each one's own noisy reading. This is real, already-shipped
+  infrastructure for exactly the "adjust for floor coverings before
+  analysis" pre-processing step the Diagnostics brief calls for — it does
+  not need to be invented, only consumed.
+- **Real gap, confirmed across two independent real jobs, not a guess:**
+  points essentially never carry a `label` beyond the one base point
+  ("BP1"). Epoch Comparison's design (in the Diagnostics brief) matches
+  points *by label* between two surveys — that data mostly doesn't exist
+  yet. Needs a decision from Tim: add point labeling to Floor Survey's
+  capture flow, or have Epoch Comparison match by index/position instead.
+
+**3D visualization already exists in Floor Survey — `ThreeDTab.tsx`.**
+Real, working, Three.js-based: rotatable colored elevation mesh built
+from the same grid as the 2D Topo view, free-orbit camera, height
+exaggeration slider, optional point spheres, and PNG screenshot export
+already built in. This is Diagnostics screen #1 from the brief, already
+shipped — not a green-field build.
+
+**Locked decision (Tim, this conversation):** going forward, 3D
+visualization lives in Diagnostics only. The Toolbox-native Floor Survey
+rebuild will not include a 3D tab at all. Diagnostics' own 3D screen gets
+built fresh in Toolbox, informed by `ThreeDTab.tsx`'s proven approach —
+never by editing or removing anything in the standalone
+`floorplan-topo-maker` repo, which stays untouched per the hard rule.
+
+**Still an open question, not resolved:** the Diagnostics brief also
+describes tilt/deflection, IQR, time-change, and monitoring as "existing
+screens" to wire up. Searched all of Floor Survey's source for
+deflection, IQR, monitoring, time-change, epoch, angular distortion, and
+Skempton — none of it exists anywhere in this codebase. Either those four
+live in some other tool/file Tim has that hasn't been shared, or
+"existing" in the brief meant "already agreed as a screen to build," not
+"already coded." Needs Tim to clarify before assuming either way.
