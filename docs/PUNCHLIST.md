@@ -271,3 +271,37 @@ Skempton — none of it exists anywhere in this codebase. Either those four
 live in some other tool/file Tim has that hasn't been shared, or
 "existing" in the brief meant "already agreed as a screen to build," not
 "already coded." Needs Tim to clarify before assuming either way.
+
+## Diagnostics screen #1 (3D elevation view) — built
+
+Diagnostics is now a live drawer on the hub, not a placeholder. First
+screen: a rotatable colored elevation mesh, `diagnostics.html` /
+`js/diagnostics.js`. It reads the same imported Floor Survey data Report
+Builder reads (strictly read-only, same rule) and applies the same
+transition corrections before building the surface.
+
+- **The math is ported, not reinvented.** `js/topo-grid.js` carries the
+  thin-plate-spline interpolation (`buildGrid`) straight from
+  `floor/src/lib/topo.ts`, and the mesh-building steps (grid → colored
+  vertices → triangle indices → point spheres) follow
+  `floor/src/components/ThreeDTab.tsx`'s approach. Both are reference-only
+  reads of the standalone repo; nothing there was touched.
+- **`js/floor-survey-math.js`** — the transition-correction functions
+  (`correctedPointValue` etc.) were pulled out of `report.js` into their
+  own shared module so Diagnostics and Report Builder use the exact same
+  corrected values, not two copies that could drift apart.
+- **three.js is vendored locally** (`js/vendor/three.min.js` +
+  `OrbitControls.js`, r128 — the last version with a plain global-script
+  build), same reasoning as jsPDF: the actual deliverable shouldn't depend
+  on a CDN being reachable.
+- **No palette picker in v1.** Real Floor Survey's `ThreeDTab` takes
+  `palette`/`reversePalette` from the app's `RenderSettings`, which
+  Toolbox doesn't store (the imported bundle doesn't carry them). Shipped
+  with one fixed palette (`topographic`) instead of inventing a settings
+  layer that doesn't exist yet. Revisit if Tim wants palette choice here.
+- Verified end to end: empty state with no Floor Survey data, mesh
+  renders and colors correctly from real point data, floor picker across
+  multiple floors, height-exaggeration slider and show-points toggle work
+  without mutating stored data (checked byte-for-byte), PNG export
+  produces a real image, and the friendly "need at least 3 points" /
+  "boundary missing" messages match Floor Survey's own.

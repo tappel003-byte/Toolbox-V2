@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#f4f0e8">
+<title>Toolbox</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/styles.css">
+<style>
+  .diag-floor-picker { margin-bottom: 14px; }
+  .diag-floor-picker select { width: 100%; }
+
+  .diag-viewport {
+    position: relative;
+    height: min(62vh, 560px);
+    min-height: 280px;
+    background: #0b0b0b;
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+  .diag-mount { position: absolute; inset: 0; }
+  .diag-mount canvas { display: block; }
+
+  .diag-status {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.65); font-size: 14px; text-align: center; padding: 0 24px;
+  }
+
+  .diag-panel {
+    position: absolute; top: 10px; right: 10px; width: 200px;
+    background: rgba(0,0,0,0.68);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding: 12px;
+    color: rgba(255,255,255,0.85);
+    font-size: 12px;
+  }
+  .diag-panel .diag-panel-row { margin-bottom: 10px; }
+  .diag-panel .diag-panel-row:last-child { margin-bottom: 0; }
+  .diag-panel label { display: block; margin-bottom: 6px; color: rgba(255,255,255,0.8); }
+  .diag-panel input[type="range"] { width: 100%; }
+  .diag-panel .toggle-row { display: flex; align-items: center; justify-content: space-between; }
+  .diag-hint-dark { color: rgba(255,255,255,0.45); font-size: 10px; line-height: 1.4; margin-top: 8px; }
+
+  .diag-toolbar { display: flex; gap: 10px; }
+</style>
+</head>
+<body>
+<header class="app-bar">
+  <a class="back" id="back-link" href="index.html">‹ Customer</a>
+  <h1>Diagnostics</h1>
+  <span></span>
+</header>
+
+<main>
+  <div class="hint" style="margin-bottom:14px;">Read-only — this 3D surface is built straight from Floor Survey's imported points, with any flooring-transition corrections already applied. To fix a reading, edit it at the source; this updates automatically.</div>
+
+  <div id="diag-floor-picker" class="diag-floor-picker" style="display:none;">
+    <select id="f-floor-select"></select>
+  </div>
+
+  <div id="diag-body">
+    <div class="diag-viewport">
+      <div id="diag-mount" class="diag-mount"></div>
+      <div id="diag-status" class="diag-status">Building surface…</div>
+      <div id="diag-panel" class="diag-panel" style="display:none;">
+        <div class="diag-panel-row">
+          <label for="f-exaggeration">Height exaggeration · <span id="exaggeration-value">3.0</span>×</label>
+          <input type="range" id="f-exaggeration" min="0.5" max="20" step="0.1" value="3">
+        </div>
+        <div class="diag-panel-row toggle-row">
+          <label for="f-show-points" style="margin:0;">Show survey points</label>
+          <input type="checkbox" id="f-show-points">
+        </div>
+        <div class="diag-hint-dark">Drag to orbit · scroll to zoom · right-drag to pan</div>
+      </div>
+    </div>
+    <div class="diag-toolbar">
+      <button type="button" id="btn-export-png" class="btn" disabled>Export Image</button>
+    </div>
+  </div>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script src="js/vendor/three.min.js"></script>
+<script src="js/vendor/OrbitControls.js"></script>
+<script src="js/util.js"></script>
+<script src="js/db.js"></script>
+<script src="js/floor-survey-math.js"></script>
+<script src="js/topo-grid.js"></script>
+<script src="js/diagnostics.js"></script>
+</body>
+</html>

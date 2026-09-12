@@ -29,6 +29,7 @@ async function loadCustomer() {
 
   editLink.href = `job.html?job=${encodeURIComponent(currentKey)}`;
   document.getElementById('drawer-report-builder').href = `report.html?job=${encodeURIComponent(currentKey)}`;
+  document.getElementById('drawer-diagnostics').href = `diagnostics.html?job=${encodeURIComponent(currentKey)}`;
 
   try {
     currentJob = await getJob(currentKey);
