@@ -372,3 +372,41 @@ rebuilt inside Toolbox — Floor Survey's own native capture is still ahead.
   all persist across reload, delete doesn't renumber survivors, the
   import/native collision case above, and Report Builder rendering both
   pin sources correctly in one schedule.
+
+## Floor Survey — first native drawer build (all four drawers now live)
+
+Floor Survey now has its own capture screen too (`floor-survey.html` /
+`js/floor-survey-capture.js`): draw a floor's boundary, then tap inside it
+to drop survey points and type each elevation reading. This is the second
+"sacred cow" rebuild, and it closes out the hub — every drawer button on
+customer.html is now a real screen, none are "coming soon" placeholders.
+
+- **Same schema-reuse trick as Distress Survey, and it paid off
+  immediately.** A native floor is stored in the exact same
+  `job.floorSurvey.{floors,points}` shape the import bridge already
+  produces, just tagged `origin:'native'`. Diagnostics' 3D view and Report
+  Builder's H/L/Δ needed zero code changes to pick it up — verified
+  directly (drew a floor, placed 3 points with real values, opened both
+  screens, got a correct mesh and the exact right H 9.25"/L 8.75"/Δ 0.50").
+- **v1 scope, on purpose (same pattern as Distress Survey):** no
+  transitions, no exclusions, no scale calibration, and native capture
+  always creates its own new floor rather than adding points to an
+  already-imported one — avoids the ambiguity of two very different
+  sources both claiming to own one floor's boundary/plan.
+- **The import-vs-native collision fix from Distress Survey applies here
+  too, adapted to floors instead of pins.** A re-imported bundle replaces
+  only `origin:'import'` floors/points and always preserves native ones;
+  a native floor id colliding with an imported one (vanishingly unlikely,
+  but handled rather than assumed away) gets regenerated rather than
+  letting the import silently take precedence.
+- **Point numbering doesn't need the same "never renumber" caution pins
+  needed.** A Floor Survey point's index isn't cross-referenced to a
+  physical photo print — there's no camera involved — so reusing a
+  retired index after a delete is harmless. Simpler than the Distress
+  Survey rule, deliberately, because the underlying risk is different.
+- Verified end to end: the new-floor form appears immediately when a job
+  has no native floors yet, Finish Boundary stays disabled under 3
+  vertices, tapping outside a finished boundary is rejected with a toast
+  instead of silently creating a bad point, the first point on a floor
+  becomes its base point, value/label persist across reload, and the
+  import/native coexistence case above.

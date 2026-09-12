@@ -31,6 +31,7 @@ async function loadCustomer() {
   document.getElementById('drawer-report-builder').href = `report.html?job=${encodeURIComponent(currentKey)}`;
   document.getElementById('drawer-diagnostics').href = `diagnostics.html?job=${encodeURIComponent(currentKey)}`;
   document.getElementById('drawer-distress-survey').href = `distress-survey.html?job=${encodeURIComponent(currentKey)}`;
+  document.getElementById('drawer-floor-survey').href = `floor-survey.html?job=${encodeURIComponent(currentKey)}`;
 
   try {
     currentJob = await getJob(currentKey);
@@ -77,7 +78,8 @@ function renderDrawerDataSummary() {
   }
   if (currentJob.floorSurvey) {
     const fs = currentJob.floorSurvey;
-    parts.push(`<div class="card" style="padding:10px;">Floor Survey — ${fs.floors.length} floor${fs.floors.length === 1 ? '' : 's'}, ${fs.points.length} point${fs.points.length === 1 ? '' : 's'} imported ${formatUpdated(fs.importedAt)}</div>`);
+    const fsDateLabel = fs.updatedAt ? `updated ${formatUpdated(fs.updatedAt)}` : `imported ${formatUpdated(fs.importedAt)}`;
+    parts.push(`<div class="card" style="padding:10px;">Floor Survey — ${fs.floors.length} floor${fs.floors.length === 1 ? '' : 's'}, ${fs.points.length} point${fs.points.length === 1 ? '' : 's'} ${fsDateLabel}</div>`);
   }
   list.innerHTML = parts.join('');
 }
@@ -136,11 +138,38 @@ document.getElementById('f-import-fs').addEventListener('change', async (e) => {
   try {
     const text = await file.text();
     const bundle = parseFloorSurveyJson(text);
-    currentJob.floorSurvey = { ...bundle, importedAt: Date.now() };
+    // Same rule as Distress Survey: re-importing replaces only the
+    // previously-imported floors/points; any floor captured natively in
+    // the Floor Survey drawer since then is tagged origin:'native' and is
+    // never touched by an import.
+    const importedFloors = bundle.floors.map((f) => ({ ...f, origin: 'import' }));
+    const importedFloorIds = new Set(importedFloors.map((f) => f.id));
+    const importedPoints = bundle.points.map((p) => ({ ...p, origin: 'import' }));
+
+    const existingFs = currentJob.floorSurvey || {};
+    let nativeFloors = (existingFs.floors || []).filter((f) => f.origin === 'native');
+    let nativePoints = (existingFs.points || []).filter((p) => p.origin === 'native');
+
+    // Vanishingly unlikely, but a native floor's id could collide with an
+    // imported one — regenerate it and re-point its native points, same
+    // "bump the native side, never the import" rule as Distress Survey pins.
+    nativeFloors = nativeFloors.map((f) => {
+      if (!importedFloorIds.has(f.id)) return f;
+      const newId = 'floor_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      nativePoints = nativePoints.map((p) => (p.floorId === f.id ? { ...p, floorId: newId } : p));
+      return { ...f, id: newId };
+    });
+
+    currentJob.floorSurvey = {
+      ...existingFs,
+      floors: importedFloors.concat(nativeFloors),
+      points: importedPoints.concat(nativePoints),
+      importedAt: Date.now(),
+    };
     await saveJob(currentJob);
     renderDrawerDataSummary();
     showImportStatus('');
-    showToast(`Imported ${bundle.floors.length} floor(s), ${bundle.points.length} points.`);
+    showToast(`Imported ${importedFloors.length} floor(s), ${importedPoints.length} points.`);
   } catch (err) {
     showImportStatus(`Floor Survey import failed: ${err.message || err}`);
   }

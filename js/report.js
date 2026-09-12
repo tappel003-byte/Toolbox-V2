@@ -28,10 +28,11 @@ function renderFloorSurveySection(job) {
       </div>`;
   }).join('');
 
+  const fsDateLabel = fs.updatedAt ? `updated ${formatUpdated(fs.updatedAt)}` : `imported ${formatUpdated(fs.importedAt)}`;
   return `
     <div style="font-weight:700;margin-bottom:8px;">Floor Survey — Elevation Summary</div>
     ${cards}
-    <div class="hint" style="margin-top:2px;margin-bottom:18px;">imported ${formatUpdated(fs.importedAt)}</div>
+    <div class="hint" style="margin-top:2px;margin-bottom:18px;">${fsDateLabel}</div>
   `;
 }
 
