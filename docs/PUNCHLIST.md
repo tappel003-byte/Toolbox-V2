@@ -587,3 +587,34 @@ would produce) rather than driving the slow Tesseract OCR pipeline in
 the test: a pin dropped near "Kitchen" auto-fills Kitchen, a pin dropped
 near a generic "Room 3" label stays blank, a pin dropped far from
 everything stays blank, and a manual pick survives reopening the editor.
+
+## Service worker added — the app shell now works with zero connectivity
+
+Customer data was already offline-safe (IndexedDB never needed a
+network), but the app's own files still needed one on every fresh visit.
+Tim's actual use case is a drilling site with no reliable signal, so this
+was a real gap, not a nice-to-have — added `sw.js` precaching the full
+app shell (every HTML page, every script, the vendor libs, icons), with
+a cache-first fetch strategy and old-cache cleanup on activate.
+
+**Real bug caught before it shipped, not after:** almost every navigation
+in this app carries a `?job=<key>` query string (`job.html?job=...`,
+`report.html?job=...`, every drawer). The Cache API's default match is an
+*exact* URL comparison, so without `{ ignoreSearch: true }` on the
+lookup, every one of those would have missed the precached plain
+`job.html` entry and silently fallen through to the network — meaning
+the service worker would have done nothing for any real navigation past
+the very first `index.html` load, while looking like it worked in a
+naive test that never checked a URL with a query string.
+
+Verified with `context.setOffline(true)` — actually cutting the
+connection, not just guessing — rather than assuming registration alone
+proves it works: full page reload while offline, navigating to a
+query-stringed URL while offline, and creating a whole new customer
+(a real IndexedDB write, unrelated to the cache) while offline, all
+succeeded.
+
+Registered from `js/util.js` (already loaded on every screen) rather
+than repeating a script tag across all seven HTML pages. This is also
+the concrete piece discussed with Tim toward eventual installability —
+the manifest and icons were already in place; this was the missing half.
