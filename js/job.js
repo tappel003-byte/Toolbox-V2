@@ -334,7 +334,23 @@ els.form.addEventListener('submit', async (evt) => {
     return;
   }
 
+  // This form only ever edits the fields below. Anything else already on the
+  // record — imported drawer data, voice memos, whatever gets added later —
+  // has to survive a save here untouched, so start from the existing record
+  // (if any) and overlay just what this form actually controls. A plain
+  // `{ address, people, ... }` object would silently wipe everything else
+  // on the next full-record put().
+  let existingRecord = null;
+  if (existingKey) {
+    try {
+      existingRecord = await getJob(existingKey);
+    } catch (err) {
+      // Fall through to a fresh record rather than blocking the save.
+    }
+  }
+
   const job = {
+    ...(existingRecord || {}),
     address,
     people: {
       primaryName: els.primaryName.value.trim(),
