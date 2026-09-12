@@ -194,6 +194,12 @@ function setRecordingUi(recording, statusText) {
   }
 }
 
+// Resolves once the in-flight recording has been fully stopped, assembled,
+// and saved (or discarded as empty) — set fresh each time recording starts.
+// Anything that needs to navigate away has to await this first, or a
+// recording in progress gets silently lost.
+let recordingStopped = Promise.resolve();
+
 async function startRecording() {
   let stream;
   try {
@@ -211,36 +217,40 @@ async function startRecording() {
     if (e.data && e.data.size > 0) audioChunks.push(e.data);
   });
 
-  mediaRecorder.addEventListener('stop', async () => {
-    stream.getTracks().forEach((t) => t.stop());
-    const durationSec = (Date.now() - recordStartMs) / 1000;
-    const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+  recordingStopped = new Promise((resolveStopped) => {
+    mediaRecorder.addEventListener('stop', async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const durationSec = (Date.now() - recordStartMs) / 1000;
+      const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
 
-    if (blob.size === 0) {
+      if (blob.size === 0) {
+        setRecordingUi(false, '');
+        showToast('No audio captured — nothing saved.');
+        resolveStopped();
+        return;
+      }
+
+      const clip = {
+        id: `clip-${Date.now()}`,
+        blob,
+        mimeType: blob.type,
+        durationSec,
+        recordedAt: Date.now(),
+      };
+      currentJob.audioClips = currentJob.audioClips || [];
+      currentJob.audioClips.push(clip);
+
+      setRecordingUi(false, 'Saving…');
+      try {
+        await saveJob(currentJob);
+        showToast('Voice memo saved.');
+      } catch (err) {
+        showToast(`Could not save: ${err.message || err}`);
+      }
       setRecordingUi(false, '');
-      showToast('No audio captured — nothing saved.');
-      return;
-    }
-
-    const clip = {
-      id: `clip-${Date.now()}`,
-      blob,
-      mimeType: blob.type,
-      durationSec,
-      recordedAt: Date.now(),
-    };
-    currentJob.audioClips = currentJob.audioClips || [];
-    currentJob.audioClips.push(clip);
-
-    setRecordingUi(false, 'Saving…');
-    try {
-      await saveJob(currentJob);
-      showToast('Voice memo saved.');
-    } catch (err) {
-      showToast(`Could not save: ${err.message || err}`);
-    }
-    setRecordingUi(false, '');
-    renderClips();
+      renderClips();
+      resolveStopped();
+    });
   });
 
   mediaRecorder.start();
@@ -248,18 +258,37 @@ async function startRecording() {
   setRecordingUi(true, 'Recording… tap Stop when done.');
 }
 
-function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+// Stops recording (if any) and returns a promise that resolves once the
+// clip has actually been saved — callers that need to navigate away must
+// await this rather than firing stop() and moving on immediately.
+function stopRecordingAndWait() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
   }
+  return recordingStopped;
 }
 
 document.getElementById('btn-record').addEventListener('click', () => {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
-    stopRecording();
+    stopRecordingAndWait();
   } else {
     startRecording();
   }
 });
+
+// A recording in progress must never be abandoned by navigating away —
+// intercept any link click on this page, finish and save the recording
+// first, then continue to wherever the link was headed.
+document.addEventListener('click', (e) => {
+  if (!(mediaRecorder && mediaRecorder.state === 'recording')) return;
+  const link = e.target.closest('a[href]');
+  if (!link) return;
+  e.preventDefault();
+  const destination = link.href;
+  showToast('Saving your recording before leaving…');
+  stopRecordingAndWait().then(() => {
+    location.href = destination;
+  });
+}, true);
 
 loadCustomer();
