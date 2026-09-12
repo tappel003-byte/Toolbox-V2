@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#f4f0e8">
+<title>Toolbox</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/styles.css">
+<style>
+  table.pin-schedule { width: 100%; border-collapse: collapse; background: var(--panel); }
+  table.pin-schedule th, table.pin-schedule td {
+    border: 1px solid var(--line); padding: 8px 10px; font-size: 14px; text-align: left; vertical-align: top;
+  }
+  table.pin-schedule th { background: var(--bg); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--ink-soft); }
+  .pin-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--ink);
+    font-weight: 700; font-size: 13px; color: var(--ink);
+  }
+  .pin-badge.exterior { border-color: var(--ink-soft); color: var(--ink-soft); }
+</style>
+</head>
+<body>
+<header class="app-bar">
+  <a class="back" id="back-link" href="index.html">‹ Customer</a>
+  <h1>Report Builder</h1>
+  <span></span>
+</header>
+
+<main>
+  <div class="hint" style="margin-bottom:14px;">Read-only — everything here comes straight from Distress Survey. To fix a description, a pin number, or delete a pin, edit it there; this updates automatically.</div>
+  <div id="report-body"><!-- filled by js/report.js --></div>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script src="js/db.js"></script>
+<script src="js/report.js"></script>
+</body>
+</html>
