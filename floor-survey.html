@@ -22,6 +22,7 @@
   .fs-svg-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
   .fs-vertex { fill: var(--accent); stroke: #fff; stroke-width: 0.006; }
   .fs-boundary-line { fill: rgba(193,74,43,0.12); stroke: var(--accent); stroke-width: 0.004; }
+  .fs-exclusion-line { fill: rgba(122,116,104,0.25); stroke: var(--ink-soft); stroke-width: 0.004; stroke-dasharray: 0.012 0.008; }
   .fs-point { fill: var(--ink); stroke: #fff; stroke-width: 0.006; cursor: pointer; }
   .fs-point.base { fill: var(--accent); }
   .fs-point.selected { stroke: var(--accent); stroke-width: 0.01; }
@@ -39,6 +40,11 @@
   }
   .fs-point-row .fs-badge.base { background: var(--accent); }
   .fs-point-row .fs-meta { flex: 1; min-width: 0; font-size: 13px; }
+
+  .fs-exclusion-row { display: flex; align-items: center; gap: 10px; padding: 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .fs-exclusion-row:last-child { border-bottom: none; }
+  .fs-exclusion-row .fs-meta { flex: 1; }
+  .fs-exclusion-row button { flex: none; padding: 4px 10px; }
 </style>
 </head>
 <body>
@@ -81,6 +87,13 @@
 
     <div id="fs-points-controls" class="fs-mode-row" style="display:none;">
       <button type="button" id="btn-fs-redraw-boundary" class="btn">Redraw Boundary</button>
+      <button type="button" id="btn-fs-add-exclusion" class="btn">+ Add Exclusion Zone</button>
+    </div>
+
+    <div id="fs-exclusion-controls" class="fs-mode-row" style="display:none;">
+      <button type="button" id="btn-fs-undo-exclusion-vertex" class="btn">Undo Point</button>
+      <button type="button" id="btn-fs-finish-exclusion" class="btn btn-primary" disabled>Finish Exclusion</button>
+      <button type="button" id="btn-fs-cancel-exclusion" class="btn">Cancel</button>
     </div>
 
     <div id="fs-editor" class="card section-gap" style="display:none;">
@@ -125,6 +138,12 @@
       <div class="row" style="margin-top:10px;">
         <button type="button" id="btn-fs-delete" class="btn btn-danger">Delete Point</button>
       </div>
+    </div>
+
+    <div class="card section-gap">
+      <div style="font-weight:700;margin-bottom:8px;">Exclusion Zones</div>
+      <div class="hint" style="margin-top:0;">Readings inside still plot and count in the point list; they just don't shape the elevation surface.</div>
+      <div id="fs-exclusion-list" style="margin-top:8px;"></div>
     </div>
 
     <div class="card section-gap">

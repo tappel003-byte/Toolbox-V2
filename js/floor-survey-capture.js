@@ -6,14 +6,14 @@
 // correctly in Diagnostics' 3D view or Report Builder's H/L/Δ — both
 // already read job.floorSurvey generically.
 //
-// v1 scope, on purpose: no exclusions, no scale calibration, and native
-// capture always creates its OWN new floor rather than adding points to
-// an already-imported one (avoids ambiguous shared ownership of a floor's
+// v1 scope, on purpose: no scale calibration, and native capture always
+// creates its OWN new floor rather than adding points to an
+// already-imported one (avoids ambiguous shared ownership of a floor's
 // boundary/plan across two very different sources). Flooring transitions
-// ARE supported — real, shipped correction math (js/floor-survey-math.js)
-// already consumes them, so skipping capture here would leave a floor
-// with an actual material change (e.g. hardwood -> tile at a doorway)
-// silently reporting a wrong H/L/Δ.
+// and exclusion zones ARE supported — both are real, shipped
+// infrastructure already consumed by Diagnostics/topo-grid.js, so
+// skipping capture here would leave native floors unable to represent
+// data the rest of the app already knows how to render correctly.
 
 // Real vocabulary from floor/src/lib/transitions.ts's COMMON_SURFACES —
 // kept identical rather than invented, so a surface name here means the
@@ -29,6 +29,8 @@ let fsSelectedFloorId = null;
 let fsSelectedPointId = null;
 let fsMode = 'boundary'; // 'boundary' | 'points'
 let fsPendingBoundary = [];
+let fsDrawingExclusion = false;
+let fsPendingExclusion = [];
 let fsPlanUrl = null;
 let fsNewFloorPlanBlob = null;
 
@@ -146,9 +148,11 @@ function fsUpdateModeUI() {
   const floor = fsFloor(fsSelectedFloorId);
   const hasBoundary = !!(floor && floor.boundary && floor.boundary.length >= 3);
   fsMode = hasBoundary ? 'points' : 'boundary';
-  document.getElementById('fs-boundary-controls').style.display = fsMode === 'boundary' ? 'flex' : 'none';
-  document.getElementById('fs-points-controls').style.display = fsMode === 'points' ? 'flex' : 'none';
+  document.getElementById('fs-boundary-controls').style.display = (!fsDrawingExclusion && fsMode === 'boundary') ? 'flex' : 'none';
+  document.getElementById('fs-points-controls').style.display = (!fsDrawingExclusion && fsMode === 'points') ? 'flex' : 'none';
+  document.getElementById('fs-exclusion-controls').style.display = fsDrawingExclusion ? 'flex' : 'none';
   document.getElementById('btn-fs-finish-boundary').disabled = fsPendingBoundary.length < 3;
+  document.getElementById('btn-fs-finish-exclusion').disabled = fsPendingExclusion.length < 3;
 }
 
 function fsRenderOverlay() {
@@ -161,9 +165,18 @@ function fsRenderOverlay() {
   if (boundary.length >= 3) {
     html += `<polygon class="fs-boundary-line" points="${boundary.map((p) => `${p.x},${p.y}`).join(' ')}"></polygon>`;
   }
-  if (fsMode === 'boundary' && fsPendingBoundary.length) {
+  ((floor && floor.exclusions) || []).forEach((ex) => {
+    html += `<polygon class="fs-exclusion-line" points="${ex.polygon.map((p) => `${p.x},${p.y}`).join(' ')}"></polygon>`;
+  });
+  if (fsMode === 'boundary' && !fsDrawingExclusion && fsPendingBoundary.length) {
     html += `<polyline class="fs-boundary-line" style="fill:none;" points="${fsPendingBoundary.map((p) => `${p.x},${p.y}`).join(' ')}"></polyline>`;
     fsPendingBoundary.forEach((p) => {
+      html += `<circle class="fs-vertex" cx="${p.x}" cy="${p.y}" r="0.012"></circle>`;
+    });
+  }
+  if (fsDrawingExclusion && fsPendingExclusion.length) {
+    html += `<polyline class="fs-exclusion-line" style="fill:none;" points="${fsPendingExclusion.map((p) => `${p.x},${p.y}`).join(' ')}"></polyline>`;
+    fsPendingExclusion.forEach((p) => {
       html += `<circle class="fs-vertex" cx="${p.x}" cy="${p.y}" r="0.012"></circle>`;
     });
   }
@@ -313,6 +326,7 @@ function fsRenderAll() {
   fsRenderOverlay();
   fsRenderEditor();
   fsRenderPointList();
+  fsRenderExclusionList();
 }
 
 // ---------- Interaction ----------
@@ -361,6 +375,13 @@ function fsHandlePlanClick(e) {
   const y = (e.clientY - rect.top) / rect.height;
   if (x < 0 || x > 1 || y < 0 || y > 1) return;
 
+  if (fsDrawingExclusion) {
+    fsPendingExclusion.push({ x, y });
+    fsRenderOverlay();
+    document.getElementById('btn-fs-finish-exclusion').disabled = fsPendingExclusion.length < 3;
+    return;
+  }
+
   if (fsMode === 'boundary') {
     fsPendingBoundary.push({ x, y });
     fsRenderOverlay();
@@ -402,6 +423,74 @@ async function fsRedrawBoundary() {
   fsUpdateModeUI();
   fsRenderOverlay();
   fsRenderEditor();
+}
+
+function fsStartExclusion() {
+  fsDrawingExclusion = true;
+  fsPendingExclusion = [];
+  fsSelectedPointId = null;
+  fsUpdateModeUI();
+  fsRenderEditor();
+  fsRenderOverlay();
+}
+
+function fsCancelExclusion() {
+  fsDrawingExclusion = false;
+  fsPendingExclusion = [];
+  fsUpdateModeUI();
+  fsRenderOverlay();
+}
+
+function fsUndoExclusionVertex() {
+  fsPendingExclusion.pop();
+  fsRenderOverlay();
+  document.getElementById('btn-fs-finish-exclusion').disabled = fsPendingExclusion.length < 3;
+}
+
+async function fsFinishExclusion() {
+  const floor = fsFloor(fsSelectedFloorId);
+  if (!floor || fsPendingExclusion.length < 3) return;
+  const exclusion = {
+    id: 'excl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    polygon: fsPendingExclusion.slice(),
+    createdAt: Date.now(),
+  };
+  floor.exclusions = floor.exclusions || [];
+  floor.exclusions.push(exclusion);
+  fsDrawingExclusion = false;
+  fsPendingExclusion = [];
+  await fsSave();
+  fsUpdateModeUI();
+  fsRenderOverlay();
+  fsRenderExclusionList();
+}
+
+async function fsDeleteExclusion(id) {
+  const floor = fsFloor(fsSelectedFloorId);
+  if (!floor) return;
+  if (!confirm('Delete this exclusion zone?')) return;
+  floor.exclusions = (floor.exclusions || []).filter((ex) => ex.id !== id);
+  await fsSave();
+  fsRenderOverlay();
+  fsRenderExclusionList();
+}
+
+function fsRenderExclusionList() {
+  const list = document.getElementById('fs-exclusion-list');
+  const floor = fsFloor(fsSelectedFloorId);
+  const exclusions = (floor && floor.exclusions) || [];
+  if (!exclusions.length) {
+    list.innerHTML = '<div class="hint" style="margin:0;">None yet.</div>';
+    return;
+  }
+  list.innerHTML = exclusions.map((ex, i) => `
+    <div class="fs-exclusion-row">
+      <div class="fs-meta">Zone ${i + 1} (${ex.polygon.length}-point polygon)</div>
+      <button type="button" class="btn btn-danger" data-id="${escapeHtml(ex.id)}">Delete</button>
+    </div>`).join('');
+  list.querySelectorAll('button[data-id]').forEach((btn) => {
+    btn.addEventListener('click', () => fsDeleteExclusion(btn.getAttribute('data-id')));
+  });
 }
 
 function fsUpdateValueLocal(text) {
@@ -484,12 +573,18 @@ async function loadFloorSurveyCapture() {
   document.getElementById('f-fs-floor-select').addEventListener('change', (e) => {
     fsSelectedFloorId = e.target.value;
     fsPendingBoundary = [];
+    fsDrawingExclusion = false;
+    fsPendingExclusion = [];
     fsSelectedPointId = null;
     fsRenderAll();
   });
   document.getElementById('btn-fs-undo-vertex').addEventListener('click', fsUndoVertex);
   document.getElementById('btn-fs-finish-boundary').addEventListener('click', fsFinishBoundary);
   document.getElementById('btn-fs-redraw-boundary').addEventListener('click', fsRedrawBoundary);
+  document.getElementById('btn-fs-add-exclusion').addEventListener('click', fsStartExclusion);
+  document.getElementById('btn-fs-cancel-exclusion').addEventListener('click', fsCancelExclusion);
+  document.getElementById('btn-fs-undo-exclusion-vertex').addEventListener('click', fsUndoExclusionVertex);
+  document.getElementById('btn-fs-finish-exclusion').addEventListener('click', fsFinishExclusion);
   document.getElementById('btn-fs-done').addEventListener('click', () => fsSelectPoint(null));
   document.getElementById('btn-fs-delete').addEventListener('click', fsDeletePoint);
   document.getElementById('f-fs-value').addEventListener('input', (e) => fsUpdateValueLocal(e.target.value));

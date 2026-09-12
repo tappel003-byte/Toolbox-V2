@@ -452,3 +452,23 @@ their own: `fsSelectedPointId`/`fsSelectedFloorId`/`dsSelectedId` were
 being set *after* awaiting the save instead of before, leaving a real
 window where a fast follow-up edit could target a stale selection or
 silently no-op. Fixed alongside the queue.
+
+## Exclusion-zone capture added
+
+Same gap pattern as transitions, closed the same way: Diagnostics and
+`topo-grid.js`'s `buildGrid()` already fully support `floor.exclusions[]`
+(holes that drop readings from the interpolated surface without hiding
+them from the point list) — real, ported, tested weeks ago — but native
+capture had no way to draw one. Added "+ Add Exclusion Zone" to the
+Floor Survey drawer: reuses the same tap-to-place-vertex interaction as
+boundary drawing, stores into the same `floor.exclusions[]` array the
+import bundle already uses, with a list + delete.
+
+Verified with a constructed case rather than assumed: placed a 500"
+outlier point, drew an exclusion zone around it, then asked the real
+production functions (`buildGrid`, `topoPointInPolygon` — not a
+reimplementation in the test) whether it was actually dropped from the
+interpolated range. It was (active count 3 of 4, grid max 9.3" instead of
+500"), and Diagnostics rendered a clean mesh from the same data with zero
+code changes — the same schema-reuse payoff as every native-capture
+feature added this session.
