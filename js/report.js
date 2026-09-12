@@ -10,27 +10,65 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+// ---- Floor Survey transition corrections ----
+// Ported from floor/src/lib/transitions.ts (real Floor Survey source) rather
+// than reimplemented from scratch — this has to match exactly, or Report
+// Builder's H/L/Δ silently disagrees with what Floor Survey itself would
+// show for the same floor. Reference only; the standalone repo is never
+// edited, per the hard rule.
+
+function normalizeSurfaceForGrouping(name) {
+  const trimmed = (name || '').trim();
+  if (trimmed === 'Carpet/slab' || trimmed === 'Concrete/slab') return 'slab';
+  if (trimmed === 'Subfloor' || trimmed === 'Carpet/subfloor') return 'subfloor';
+  return trimmed;
+}
+
+function transitionDelta(t, groupAverages) {
+  if (t.manualDeltaOverride !== undefined) return t.manualDeltaOverride;
+  if (t.useGroupAverage) {
+    const key = `${normalizeSurfaceForGrouping(t.surfaceA)}→${normalizeSurfaceForGrouping(t.surfaceB)}`;
+    const avg = groupAverages && groupAverages[key];
+    if (avg !== undefined) return avg;
+  }
+  return t.readingA - t.readingB;
+}
+
+// Corrected value used for stats/export. Anchor points keep their stored
+// value (already base-frame); everything else adds its transition's delta.
+function correctedPointValue(p, transitions, groupAverages) {
+  if (!p.transitionId || p.isTransitionAnchor) return p.value;
+  const t = (transitions || []).find((x) => x.id === p.transitionId);
+  if (!t) return p.value;
+  return Math.round((p.value + transitionDelta(t, groupAverages)) * 100) / 100;
+}
+
+function computeFloorHighLowDelta(floor, allPoints) {
+  const pts = (allPoints || []).filter((p) => p.floorId === floor.id);
+  if (!pts.length) return null;
+  const values = pts.map((p) => correctedPointValue(p, floor.transitions, floor.transitionGroupAverages));
+  const high = Math.max(...values);
+  const low = Math.min(...values);
+  return { high, low, delta: high - low, count: pts.length };
+}
+
 function renderFloorSurveySection(job) {
   const fs = job.floorSurvey;
   if (!fs || !fs.floors || !fs.floors.length) return '';
 
   const cards = fs.floors.map((floor) => {
-    const pts = (fs.points || []).filter((p) => p.floorId === floor.id);
-    if (!pts.length) {
+    const stats = computeFloorHighLowDelta(floor, fs.points);
+    if (!stats) {
       return `<div class="hl-card"><div class="floor-name">${escapeHtml(floor.name || 'Floor')}</div><div class="hint" style="margin:0;">No points on this floor.</div></div>`;
     }
-    const values = pts.map((p) => p.value);
-    const high = Math.max(...values);
-    const low = Math.min(...values);
-    const delta = high - low;
     return `
       <div class="hl-card">
         <div class="floor-name">${escapeHtml(floor.name || 'Floor')}</div>
         <div class="hl-pill">
-          <span class="hi">H ${high.toFixed(2)}"</span>
-          <span class="lo">L ${low.toFixed(2)}"</span>
-          <span>Δ ${delta.toFixed(2)}"</span>
-          <span class="hint" style="margin:0;">${pts.length} point${pts.length === 1 ? '' : 's'}</span>
+          <span class="hi">H ${stats.high.toFixed(2)}"</span>
+          <span class="lo">L ${stats.low.toFixed(2)}"</span>
+          <span>Δ ${stats.delta.toFixed(2)}"</span>
+          <span class="hint" style="margin:0;">${stats.count} point${stats.count === 1 ? '' : 's'}</span>
         </div>
       </div>`;
   }).join('');
@@ -111,14 +149,10 @@ function buildReportPdf(job) {
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(10);
     fs.floors.forEach((floor) => {
-      const pts = (fs.points || []).filter((p) => p.floorId === floor.id);
-      if (!pts.length) return;
-      const values = pts.map((p) => p.value);
-      const high = Math.max(...values);
-      const low = Math.min(...values);
-      const delta = high - low;
+      const stats = computeFloorHighLowDelta(floor, fs.points);
+      if (!stats) return;
       pdf.text(
-        `${floor.name || 'Floor'} — H ${high.toFixed(2)}"  L ${low.toFixed(2)}"  Δ ${delta.toFixed(2)}"  (${pts.length} points)`,
+        `${floor.name || 'Floor'} — H ${stats.high.toFixed(2)}"  L ${stats.low.toFixed(2)}"  Δ ${stats.delta.toFixed(2)}"  (${stats.count} points)`,
         margin, y
       );
       y += 0.22;
