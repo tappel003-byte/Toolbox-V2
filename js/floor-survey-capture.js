@@ -70,7 +70,9 @@ function fsPoint(id) {
 // ever-current object, so there is no earlier snapshot left to overwrite
 // with. Still queued so rapid saves don't pile up redundant writes.
 let __fsSaveQueue = Promise.resolve();
+let __fsSavesInFlight = 0;
 function fsSave() {
+  __fsSavesInFlight += 1;
   __fsSaveQueue = __fsSaveQueue.then(async () => {
     fsJob.floorSurvey = {
       ...(fsJob.floorSurvey || {}),
@@ -79,9 +81,22 @@ function fsSave() {
       updatedAt: Date.now(),
     };
     await saveJob(fsJob);
-  });
+  }).finally(() => { __fsSavesInFlight -= 1; });
   return __fsSaveQueue;
 }
+
+// Link clicks are covered by the click-interceptor below, but a reload,
+// browser-back, or closing the tab bypasses that entirely — there's no
+// click to intercept. beforeunload can't reliably await an async save,
+// but it CAN block navigation with the browser's own confirmation prompt
+// while a save is still in flight, buying it time to actually commit
+// instead of silently losing the edit.
+window.addEventListener('beforeunload', (e) => {
+  if (__fsSavesInFlight > 0) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
 
 // ---------- Floor management ----------
 

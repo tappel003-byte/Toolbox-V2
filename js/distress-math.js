@@ -39,3 +39,52 @@ function pinCardinalDirection(pinX, pinY, frontDoor) {
   const bearing = (alpha + offset) % 360;
   return DISTRESS_DIRS[Math.round(bearing / 45) % 8];
 }
+
+// Room auto-guess, ported from pinRoom()/_isGenericRoomLabel() in
+// distress/survey.html rather than reinvented — nearest-room-label
+// scoring with the same two guards the real app uses: an absolute
+// distance cutoff, and an ambiguity check that refuses to guess when a
+// runner-up room is nearly as close as the winner. v1 simplification:
+// the real app also disambiguates duplicate room names for display
+// ("Bedroom" x2 -> "North Bedroom"/"South Bedroom") using the same
+// front-door bearing math above; not ported here, since Toolbox's room
+// picker shows raw job.rooms names and a disambiguated label wouldn't
+// match any option in it. Deferred, not dropped silently — see the punch list.
+const DISTRESS_GENERIC_ROOM_WORDS = new Set([
+  'room', 'rooms', 'area', 'areas', 'notes', 'note', 'label', 'labels',
+  'space', 'spaces', 'zone', 'zones', 'section', 'sections', 'plan', 'plans',
+  'floor', 'floors', 'level', 'levels', 'unit', 'units', 'tbd', 'n/a', 'na',
+]);
+
+function isGenericRoomLabel(name) {
+  const s = (name || '').trim().toLowerCase();
+  if (!s) return true;
+  const core = s.replace(/[\s\-#_.:]*\d+$/, '').trim();
+  if (!core) return true;
+  return DISTRESS_GENERIC_ROOM_WORDS.has(core);
+}
+
+// rooms: job.rooms, [{id,name,x?,y?}] (x/y already 0-1 fractions; a room
+// typed but never placed on the plan has no x/y and can't be guessed
+// against). pinX/pinY: 0-1 fractions of the same plan.
+function guessPinRoom(rooms, pinX, pinY) {
+  if (!rooms || !rooms.length) return '';
+  const scored = [];
+  for (let i = 0; i < rooms.length; i++) {
+    const r = rooms[i];
+    if (r.x == null || r.y == null) continue;
+    if (isGenericRoomLabel(r.name)) continue;
+    scored.push({ i, d: Math.hypot(r.x - pinX, r.y - pinY) });
+  }
+  if (!scored.length) return '';
+  scored.sort((a, b) => a.d - b.d);
+  const best = scored[0];
+  // Absolute guard: closest label is very far from the pin — don't guess.
+  if (best.d > 0.28) return '';
+  // Ambiguity guard: require a clear winner over the runner-up.
+  if (scored.length > 1) {
+    const next = scored[1];
+    if (best.d > 0.02 && next.d < best.d * 1.25) return '';
+  }
+  return rooms[best.i].name;
+}

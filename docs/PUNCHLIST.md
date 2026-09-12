@@ -545,3 +545,45 @@ never confirmed before something else happens). Every current auto-save
 path in both native capture screens is now covered by this guard; if a
 third drawer ever gets its own auto-saving capture screen, it needs the
 same click-interceptor from day one, not bolted on after a bug report.
+
+**One more layer found immediately after, by the same regression suite
+doing its job:** the click-interceptor only covers `<a href>` clicks — a
+reload, browser back/forward, or closing the tab bypasses it entirely,
+since there's no click to intercept. A test reloading the page right
+after typing a label caught exactly this. `beforeunload` can't reliably
+await an async save (a real, unavoidable web-platform limitation — no
+API guarantees a page will wait for pending work during unload), but it
+*can* put up the browser's own "leave site? changes may not be saved"
+confirmation while a save is still in flight, which buys the write real
+time to land instead of guaranteeing nothing. Added to both screens as
+defense-in-depth alongside the click-interceptor, not a replacement for
+it — verified the click-guarded path is still what actually matters most
+(20/20 clean via real navigation, per the section above).
+
+## Distress Survey room auto-guess ported
+
+Native pin capture always required manually picking a room from a
+dropdown. Real survey.html auto-guesses it from the plan's placed room
+labels (`pinRoom()`) — nearest-room scoring with two guards: an absolute
+distance cutoff, and an ambiguity check that refuses to guess when a
+runner-up room is nearly as close as the winner. Ported faithfully,
+including the generic-label skip list (a label like "Room 3" is never
+guessed). Fires once, the first time a pin's editor opens with no room
+set yet — never overwrites a manual pick, matching the real app's own
+exact tradeoff (a deliberately-cleared room looks identical to "never
+set" and can get re-guessed on next open; accepted, not fixed, because
+the real app has the same behavior).
+
+**Deliberately not ported:** the real app also disambiguates duplicate
+room names for display ("Bedroom" x2 → "North Bedroom"/"South Bedroom"
+using the same front-door bearing math already ported for pin direction).
+Skipped because Toolbox's room picker shows raw `job.rooms` names as its
+options — a disambiguated label wouldn't match any option in the
+dropdown. Revisit if duplicate room names turn out to be common in
+practice.
+
+Verified with seeded room positions (standing in for what OCR detection
+would produce) rather than driving the slow Tesseract OCR pipeline in
+the test: a pin dropped near "Kitchen" auto-fills Kitchen, a pin dropped
+near a generic "Room 3" label stays blank, a pin dropped far from
+everything stays blank, and a manual pick survives reopening the editor.

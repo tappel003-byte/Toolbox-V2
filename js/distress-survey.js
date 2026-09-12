@@ -28,7 +28,9 @@ function dsPins() {
 // race entirely. Still queued so rapid saves don't pile up redundant
 // writes.
 let __dsSaveQueue = Promise.resolve();
+let __dsSavesInFlight = 0;
 function dsSave() {
+  __dsSavesInFlight += 1;
   __dsSaveQueue = __dsSaveQueue.then(async () => {
     dsJob.distressSurvey = {
       ...(dsJob.distressSurvey || {}),
@@ -36,9 +38,21 @@ function dsSave() {
       updatedAt: Date.now(),
     };
     await saveJob(dsJob);
-  });
+  }).finally(() => { __dsSavesInFlight -= 1; });
   return __dsSaveQueue;
 }
+
+// Same defense-in-depth as Floor Survey's matching guard: link clicks are
+// covered by the click-interceptor below, but a reload, browser-back, or
+// closing the tab bypasses that entirely. beforeunload can't reliably
+// await an async save, but it can block navigation with the browser's own
+// confirmation prompt while a save is still in flight.
+window.addEventListener('beforeunload', (e) => {
+  if (__dsSavesInFlight > 0) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
 
 function dsNextPinNumber() {
   const pins = dsPins();
@@ -80,6 +94,19 @@ function dsRenderEditor() {
   const p = dsSelectedId && dsPin(dsSelectedId);
   if (!p) { editor.style.display = 'none'; return; }
   editor.style.display = 'block';
+
+  // Auto-guess the room from the plan's placed room labels the first
+  // time this pin's editor opens with no room set yet — ported from
+  // survey.html's renderPinSheetContent(). Never runs again once a room
+  // is set, so it can never clobber a manual pick (or a deliberate clear,
+  // which the real app accepts as the same tradeoff).
+  if (!p.room) {
+    const guess = guessPinRoom(dsJob.rooms, p.x, p.y);
+    if (guess) {
+      p.room = guess;
+      dsSave();
+    }
+  }
 
   document.getElementById('ds-editor-title').textContent =
     `Pin #${p.pin}` + (p.direction ? ` — ${p.direction}` : '');
