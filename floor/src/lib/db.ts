@@ -14,6 +14,10 @@ const TOOLBOX_JOB_KEY: string | null =
   typeof location !== "undefined" ? new URLSearchParams(location.search).get("job") : null;
 
 type StoredProjectMeta = ProjectMeta & { toolboxJobKey?: string };
+// Same origin-tagging convention js/drawer-import.js already uses for
+// Distress Survey pins — 'import' rows come from a .floorsurvey.json import
+// and are never touched by dual-write; 'native' rows are this drawer's own.
+type Tagged<T> = T & { origin?: "import" | "native" };
 
 interface FloorSurveyDB extends DBSchema {
   projects: {
@@ -237,8 +241,34 @@ function mirrorProjectToJobPocket(projectId: string) {
       const pocket = await getJobPocket();
       const job = await pocket.get("jobs", TOOLBOX_JOB_KEY);
       if (!job) return;
+      // Merge, never replace: imported floors/points (from a .floorsurvey.json
+      // import) are never touched here — only the native side is recomputed
+      // from this drawer's current state each save. A native floor id
+      // colliding with an imported one gets a fresh id, same rule
+      // js/customer.js's JSON import handler already uses in the other
+      // direction, so import and native capture can't destroy each other.
       const existingFloorSurvey = (job.floorSurvey as Record<string, unknown>) || {};
-      job.floorSurvey = { ...existingFloorSurvey, floors, points, updatedAt: Date.now() };
+      const existingFloors = ((existingFloorSurvey.floors as Tagged<Floor>[]) || []);
+      const existingPoints = ((existingFloorSurvey.points as Tagged<SurveyPoint>[]) || []);
+      const importedFloors = existingFloors.filter((f) => f.origin === "import");
+      const importedFloorIds = new Set(importedFloors.map((f) => f.id));
+      const importedPoints = existingPoints.filter((p) => p.origin === "import");
+
+      let nativeFloors: Tagged<Floor>[] = floors.map((f) => ({ ...f, origin: "native" }));
+      let nativePoints: Tagged<SurveyPoint>[] = points.map((p) => ({ ...p, origin: "native" }));
+      nativeFloors = nativeFloors.map((f) => {
+        if (!importedFloorIds.has(f.id)) return f;
+        const newId = "floor_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        nativePoints = nativePoints.map((p) => (p.floorId === f.id ? { ...p, floorId: newId } : p));
+        return { ...f, id: newId };
+      });
+
+      job.floorSurvey = {
+        ...existingFloorSurvey,
+        floors: importedFloors.concat(nativeFloors),
+        points: importedPoints.concat(nativePoints),
+        updatedAt: Date.now(),
+      };
       job.updatedAt = Date.now();
       await pocket.put("jobs", job);
     } catch (e) {
@@ -256,7 +286,13 @@ function clearJobFloorSurvey(jobKey: string): Promise<void> {
       const pocket = await getJobPocket();
       const job = await pocket.get("jobs", jobKey);
       if (!job) return;
-      job.floorSurvey = { floors: [], points: [], updatedAt: Date.now() };
+      // Deleting the native project clears only the native side — imported
+      // floors/points (from a .floorsurvey.json import) are a separate,
+      // untouched source and must survive this drawer's project going away.
+      const existingFloorSurvey = (job.floorSurvey as Record<string, unknown>) || {};
+      const importedFloors = ((existingFloorSurvey.floors as Tagged<Floor>[]) || []).filter((f) => f.origin === "import");
+      const importedPoints = ((existingFloorSurvey.points as Tagged<SurveyPoint>[]) || []).filter((p) => p.origin === "import");
+      job.floorSurvey = { floors: importedFloors, points: importedPoints, updatedAt: Date.now() };
       job.updatedAt = Date.now();
       await pocket.put("jobs", job);
     } catch (e) {

@@ -3421,7 +3421,25 @@ function mirrorProjectToJobPocket() {
       });
       const job = await getJob(TOOLBOX_JOB_KEY);
       if (!job) return;
-      job.distressSurvey = { ...(job.distressSurvey || {}), pins: mirrored, updatedAt: Date.now() };
+      // Merge, never replace: imported pins (from a pins.csv import) are
+      // never touched or renumbered here — only the native side is
+      // recomputed from this drawer's current state each save. A native
+      // pin number colliding with an imported one gets bumped, same rule
+      // js/customer.js's CSV import handler already uses in the other
+      // direction, so re-importing and native capture can never destroy
+      // each other's data no matter which happens first or last.
+      const existingImported = ((job.distressSurvey && job.distressSurvey.pins) || []).filter((p) => p.origin === 'import');
+      const usedNumbers = new Set(existingImported.map((p) => p.pin));
+      let nextFree = existingImported.length ? Math.max(...existingImported.map((p) => p.pin)) + 1 : 1;
+      const nativePins = mirrored.map((p) => {
+        const tagged = { ...p, origin: 'native' };
+        if (!usedNumbers.has(tagged.pin)) { usedNumbers.add(tagged.pin); return tagged; }
+        const bumped = { ...tagged, pin: nextFree };
+        usedNumbers.add(nextFree);
+        nextFree += 1;
+        return bumped;
+      });
+      job.distressSurvey = { ...(job.distressSurvey || {}), pins: existingImported.concat(nativePins), updatedAt: Date.now() };
       await saveJob(job);
     } catch (e) {
       console.warn('Toolbox dual-write failed (local save is unaffected):', e);
