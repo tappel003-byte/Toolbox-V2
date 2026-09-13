@@ -297,8 +297,8 @@ async function loadDiagnostics() {
     document.getElementById('diag-floor-picker').style.display = 'none';
     document.getElementById('diag-body').innerHTML = `
       <div class="empty-state">
-        No Floor Survey data imported for this customer yet.<br>
-        Go to their hub and import a Floor Survey .floorsurvey.json to see it here.
+        No Floor Survey data for this customer yet.<br>
+        Capture one in Floor Survey, or import a .floorsurvey.json from their hub.
       </div>`;
     return;
   }
