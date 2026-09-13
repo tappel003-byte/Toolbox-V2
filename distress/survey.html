@@ -1639,6 +1639,13 @@ function confirmPermanentDelete(id) {
   deletePlanFromIdb(proj);
   store.trash = (store.trash||[]).filter(p => p.id !== id);
   save(); renderTrash(); renderHome();
+  // Toolbox cabinet integration: if no internal-mode project is left in this
+  // job (active or still in trash) to legitimately claim the mirror, the
+  // pocket's native pins for this job are stale — clear them. Imported pins
+  // are untouched. Trashing (reversible) never triggers this; only a
+  // permanent delete with nothing left behind does.
+  const anyInternalLeft = (store.projects||[]).some(p => p.mode === 'internal') || (store.trash||[]).some(p => p.mode === 'internal');
+  if (!anyInternalLeft) clearNativeDistressFromJobPocket();
 }
 function showExportReminderModal(address, reason, onExport, onDeleteAnyway) {
   const el = document.createElement('div');
@@ -3440,6 +3447,24 @@ function mirrorProjectToJobPocket() {
         return bumped;
       });
       job.distressSurvey = { ...(job.distressSurvey || {}), pins: existingImported.concat(nativePins), updatedAt: Date.now() };
+      await saveJob(job);
+    } catch (e) {
+      console.warn('Toolbox dual-write failed (local save is unaffected):', e);
+    }
+  });
+}
+// Called on permanent delete (confirmPermanentDelete), once no internal-mode
+// project remains in this job to legitimately claim the mirror. Drops only
+// the native rows — imported pins are a separate source and untouched.
+function clearNativeDistressFromJobPocket() {
+  if (!TOOLBOX_JOB_KEY) return;
+  if (typeof getJob !== 'function' || typeof saveJob !== 'function') return;
+  _mirrorInFlight = (_mirrorInFlight || Promise.resolve()).then(async () => {
+    try {
+      const job = await getJob(TOOLBOX_JOB_KEY);
+      if (!job) return;
+      const existingImported = ((job.distressSurvey && job.distressSurvey.pins) || []).filter((p) => p.origin === 'import');
+      job.distressSurvey = { ...(job.distressSurvey || {}), pins: existingImported, updatedAt: Date.now() };
       await saveJob(job);
     } catch (e) {
       console.warn('Toolbox dual-write failed (local save is unaffected):', e);
