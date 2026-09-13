@@ -122,9 +122,16 @@ export async function markProjectExported(id: string) {
 
 export async function deleteProject(id: string) {
   const db = await getDB();
+  const project = await db.get("projects", id);
   const floors = await listFloors(id);
   for (const f of floors) await deleteFloor(f.id);
   await db.delete("projects", id);
+  // Each deleteFloor above queues its own mirror of the shrinking floor list,
+  // but those are fire-and-forget and can still be pending once the project
+  // row itself is gone (mirrorProjectToJobPocket would then find no project
+  // and skip writing) — so explicitly, synchronously clear the job record
+  // here rather than rely on that queue draining in time.
+  if (project?.toolboxJobKey) await clearJobFloorSurvey(project.toolboxJobKey);
 }
 
 // Floors
@@ -238,4 +245,23 @@ function mirrorProjectToJobPocket(projectId: string) {
       console.warn("Toolbox dual-write failed (local save is unaffected):", e);
     }
   });
+}
+
+// Chained onto the same queue as mirrorProjectToJobPocket so it always runs
+// after any already-queued mirror for this job, and can never be clobbered
+// by one that was still in flight when the project was deleted.
+function clearJobFloorSurvey(jobKey: string): Promise<void> {
+  mirrorChain = mirrorChain.then(async () => {
+    try {
+      const pocket = await getJobPocket();
+      const job = await pocket.get("jobs", jobKey);
+      if (!job) return;
+      job.floorSurvey = { floors: [], points: [], updatedAt: Date.now() };
+      job.updatedAt = Date.now();
+      await pocket.put("jobs", job);
+    } catch (e) {
+      console.warn("Toolbox dual-write failed (local save is unaffected):", e);
+    }
+  });
+  return mirrorChain;
 }
