@@ -7,6 +7,29 @@
 // correctedPointValue, computeFloorHighLowDelta) lives in
 // js/floor-survey-math.js, shared with Diagnostics.
 
+// Exhibits — images captured directly from a Diagnostics screen (e.g. the
+// 3D view's Capture button) and stored on the job as job.exhibits[]. Shown
+// as-is, same read-only rule as everything else here: Report never edits or
+// removes an exhibit, it only displays what Diagnostics already produced.
+function renderExhibitsSection(job) {
+  const exhibits = job.exhibits || [];
+  if (!exhibits.length) return '';
+
+  const cards = exhibits.slice().sort((a, b) => a.createdAt - b.createdAt).map((ex) => {
+    const url = URL.createObjectURL(ex.blob);
+    return `
+      <div style="margin-bottom:14px;">
+        <img src="${url}" style="max-width:100%;border-radius:8px;display:block;border:1px solid var(--line);">
+        <div class="hint" style="margin-top:4px;">${escapeHtml(ex.label || 'Exhibit')} · ${escapeHtml(formatUpdated(ex.createdAt))}</div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div style="font-weight:700;margin-bottom:8px;">Exhibits</div>
+    ${cards}
+  `;
+}
+
 function renderFloorSurveySection(job) {
   const fs = job.floorSurvey;
   if (!fs || !fs.floors || !fs.floors.length) return '';
@@ -254,6 +277,43 @@ async function buildReportPdf(job) {
     }
   }
 
+  // Exhibits — images captured directly from Diagnostics (e.g. the 3D
+  // view's Capture button). One per page, shown large, same appendix
+  // placement as the Distress photo appendix above.
+  const exhibits = (job.exhibits || []).slice().sort((a, b) => a.createdAt - b.createdAt);
+  for (const ex of exhibits) {
+    pdf.addPage([11, 17], 'landscape');
+    y = margin + 0.65;
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(12);
+    pdf.setTextColor(20);
+    pdf.text('Exhibit', margin, y);
+    y += 0.3;
+    const maxW = pageW - margin * 2;
+    const maxH = pageH - margin - y - 0.3;
+    try {
+      const dataUrl = await blobToDataUrl(ex.blob);
+      const dims = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+        img.onerror = reject;
+        img.src = dataUrl;
+      });
+      const scale = Math.min(maxW / dims.w, maxH / dims.h);
+      const w = dims.w * scale, h = dims.h * scale;
+      pdf.addImage(dataUrl, jsPdfImageFormat(ex.mimeType), margin, y, w, h, undefined, 'FAST');
+      y += h + 0.15;
+    } catch (err) {
+      pdf.setDrawColor(200);
+      pdf.rect(margin, y, maxW, maxH);
+      y += maxH + 0.15;
+    }
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(9);
+    pdf.setTextColor(20);
+    pdf.text(`${ex.label || 'Exhibit'} — ${formatUpdated(ex.createdAt)}`, margin, y);
+  }
+
   // Now that total page count is known, stamp headers on every page.
   const totalPages = pdf.internal.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
@@ -293,17 +353,18 @@ async function loadReport() {
 
   const floorSection = renderFloorSurveySection(job);
   const pinSection = renderPinScheduleSection(job);
+  const exhibitsSection = renderExhibitsSection(job);
 
-  if (!floorSection && !pinSection) {
+  if (!floorSection && !pinSection && !exhibitsSection) {
     body.innerHTML = `
       <div class="empty-state">
-        No Distress Survey or Floor Survey data for this customer yet.<br>
-        Capture one in its drawer, or import a pins.csv / .floorsurvey.json from their hub.
+        No Distress Survey or Floor Survey data, or exhibits, for this customer yet.<br>
+        Capture one in its drawer or in Diagnostics, or import a pins.csv / .floorsurvey.json from their hub.
       </div>`;
     return;
   }
 
-  body.innerHTML = floorSection + pinSection;
+  body.innerHTML = floorSection + pinSection + exhibitsSection;
 
   const exportBtn = document.getElementById('btn-export-pdf');
   exportBtn.disabled = false;

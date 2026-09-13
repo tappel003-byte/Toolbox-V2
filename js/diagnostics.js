@@ -1,13 +1,18 @@
 // Diagnostics — 3D elevation view.
 // Real Diagnostics screen #1 per the brief: a rotatable colored elevation
 // mesh, informed by Floor Survey's own ThreeDTab.tsx (real source) but built
-// fresh here, vanilla JS + vendored three.js. Strictly read-only, same rule
-// as Report Builder — nothing here ever writes back to a drawer's data.
+// fresh here, vanilla JS + vendored three.js. Read-only with respect to
+// drawer data — nothing here ever writes to job.floorSurvey or job.distressSurvey.
+// The one write this file performs is Capture: appending its own exported
+// image to job.exhibits[], a field Diagnostics owns, for Report Builder to
+// display — not a mutation of any drawer's data.
 
 const DIAG_PALETTE = 'topographic';
 const DIAG_REVERSE_PALETTE = false;
+const DIAG_EXHIBIT_MARGIN_PX = 40; // white margin baked into the exported/stored image
 
 let diagJob = null;
+let diagJobKey = null;
 let diagFloors = [];
 let diagPoints = [];
 
@@ -272,6 +277,48 @@ function populateFloorPicker() {
   sel.addEventListener('change', () => buildMeshForFloor(selectedFloor()));
 }
 
+// Composes the 3D view's canvas onto a white-backed canvas with a margin,
+// so a capture is exhibit-ready straight out of Diagnostics — no manual
+// cropping/framing later.
+function padCanvasWithWhiteMargin(sourceCanvas, marginPx) {
+  const out = document.createElement('canvas');
+  out.width = sourceCanvas.width + marginPx * 2;
+  out.height = sourceCanvas.height + marginPx * 2;
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(sourceCanvas, marginPx, marginPx);
+  return out;
+}
+
+// ---------- Toolbox cabinet integration (Diagnostics -> Report exhibit) ----------
+// Appends the captured image to job.exhibits[] so Report Builder can show it
+// without an import step. Diagnostics' own storage (the local download) is
+// unaffected; this is an additional write, never a replacement, and is the
+// only field this file ever writes — floor/pin data stays untouched.
+function saveDiagnosticsExhibit(canvas, label) {
+  if (!diagJobKey || typeof getJob !== 'function' || typeof saveJob !== 'function') return;
+  canvas.toBlob(async (blob) => {
+    if (!blob) return;
+    try {
+      const job = await getJob(diagJobKey);
+      if (!job) return;
+      job.exhibits = job.exhibits || [];
+      job.exhibits.push({
+        id: 'exhibit_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+        createdAt: Date.now(),
+        source: 'diagnostics-3d',
+        label,
+        mimeType: 'image/png',
+        blob,
+      });
+      await saveJob(job);
+    } catch (e) {
+      console.warn('Toolbox exhibit save failed (local download is unaffected):', e);
+    }
+  }, 'image/png');
+}
+
 async function loadDiagnostics() {
   const params = new URLSearchParams(location.search);
   const key = params.get('job');
@@ -288,6 +335,7 @@ async function loadDiagnostics() {
   }
   if (!job) { location.href = 'index.html'; return; }
   diagJob = job;
+  diagJobKey = key;
 
   const name = (job.people && job.people.primaryName) || 'Customer';
   document.querySelector('header h1').textContent = `Diagnostics — ${name}`;
@@ -316,14 +364,21 @@ async function loadDiagnostics() {
   });
   document.getElementById('btn-export-png').addEventListener('click', () => {
     renderer.render(scene, camera);
-    const dataUrl = renderer.domElement.toDataURL('image/png');
     const floor = selectedFloor();
+    const padded = padCanvasWithWhiteMargin(renderer.domElement, DIAG_EXHIBIT_MARGIN_PX);
+
+    // Local download — unchanged behavior, now from the padded/exhibit-ready image.
+    const dataUrl = padded.toDataURL('image/png');
     const a = document.createElement('a');
     a.href = dataUrl;
     a.download = `${(floor.name || 'floor').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-3d.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+
+    // Toolbox cabinet integration: also store this capture as a Report
+    // Builder exhibit — the customer folder, not just a file on the phone.
+    saveDiagnosticsExhibit(padded, `${floor.name || 'Floor'} — 3D view`);
   });
 }
 
