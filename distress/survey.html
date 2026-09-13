@@ -168,6 +168,10 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<!-- Toolbox cabinet integration: provides getJob/saveJob for the dual-write
+     hook in mirrorProjectToJobPocket() below. Only used when opened as
+     distress/survey.html?job=<key> from within Toolbox. -->
+<script src="../js/db.js"></script>
 <style>
   :root{
     --bg:#f4f0e8; --paper:#fffaf0; --ink:#1a1a1a; --muted:#7a7468;
@@ -1017,7 +1021,12 @@
 // Distress Survey – Field Reporter
 // Pen-and-paper version
 // =====================================================================
-const STORAGE_KEY = 'pgg_survey_v1';
+// Toolbox cabinet integration: when opened as distress/survey.html?job=<key>,
+// scope this app's own storage to that customer so two jobs on one phone
+// never share a project list. Opened with no ?job= (e.g. the standalone
+// app), behavior is unchanged.
+const TOOLBOX_JOB_KEY = new URLSearchParams(location.search).get('job') || null;
+const STORAGE_KEY = TOOLBOX_JOB_KEY ? ('pgg_survey_v1:' + TOOLBOX_JOB_KEY) : 'pgg_survey_v1';
 const MAX_IMG_DIM = 2400;        // floor plan downscale cap
 const MAX_PHOTO_DIM = 1600;      // photo downscale cap
 const UNDO_LIMIT = 30;
@@ -1040,7 +1049,9 @@ let ui = {
 };
 
 // ---------- Persistence ----------
-const BACKUP_KEYS = ['pgg_survey_v1.bak1','pgg_survey_v1.bak2','pgg_survey_v1.bak3'];
+const BACKUP_KEYS = TOOLBOX_JOB_KEY
+  ? [STORAGE_KEY + '.bak1', STORAGE_KEY + '.bak2', STORAGE_KEY + '.bak3']
+  : ['pgg_survey_v1.bak1','pgg_survey_v1.bak2','pgg_survey_v1.bak3'];
 let _loadCorrupted = false;
 function load() {
   try {
@@ -3368,6 +3379,54 @@ function saveProject() {
   if (!project) return;
   project.updatedAt = Date.now();
   save();
+  mirrorProjectToJobPocket();
+}
+
+// ---------- Toolbox cabinet integration (dual-write) ----------
+// After every local save, also mirror this project's pins into the shared
+// Toolbox job record, in the exact shape js/drawer-import.js's CSV importer
+// already produces, so Diagnostics and Report Builder need no changes.
+// This app's own storage (above) remains the source of truth and keeps
+// working standalone; this is an additional write, never a replacement.
+let _mirrorInFlight = null;
+function mirrorProjectToJobPocket() {
+  if (!TOOLBOX_JOB_KEY || !project) return;
+  if (typeof getJob !== 'function' || typeof saveJob !== 'function') return;
+  // Only internal-mode projects produce the Pin/Type/Description/... shape
+  // Report Builder and Diagnostics understand; external-mode pins.csv is a
+  // different shape entirely and isn't mirrored.
+  if (project.mode !== 'internal') return;
+  const snapshot = project;
+  _mirrorInFlight = (_mirrorInFlight || Promise.resolve()).then(async () => {
+    try {
+      const orientOffset = _orientationOffset(snapshot);
+      const roomLabels = buildRoomLabels(snapshot, orientOffset);
+      const planW = snapshot.plan && snapshot.plan.width, planH = snapshot.plan && snapshot.plan.height;
+      const norm = (v, dim) => (typeof v === 'number' && isFinite(v) && dim) ? Math.round((v / dim) * 1e5) / 1e5 : 0;
+      const pins = (snapshot.pins || []).slice().sort((a, b) => (a.num || 0) - (b.num || 0));
+      const mirrored = pins.map((p) => {
+        const photoCount = (p.photos || []).length;
+        const range = photoCount ? (photoCount === 1 ? String(p.num) : (p.num + ' to ' + (p.num + photoCount - 1))) : '';
+        return {
+          pin: p.num,
+          type: p.isExterior ? 'Exterior' : 'Interior',
+          description: (p.description || '').trim(),
+          photoCount,
+          photoNumbers: range,
+          room: p.location || pinRoom(snapshot, p, roomLabels) || '',
+          direction: pinCardinal(snapshot, p, orientOffset) || '',
+          x: norm(p.x, planW),
+          y: norm(p.y, planH),
+        };
+      });
+      const job = await getJob(TOOLBOX_JOB_KEY);
+      if (!job) return;
+      job.distressSurvey = { ...(job.distressSurvey || {}), pins: mirrored, updatedAt: Date.now() };
+      await saveJob(job);
+    } catch (e) {
+      console.warn('Toolbox dual-write failed (local save is unaffected):', e);
+    }
+  });
 }
 function refreshSubtitle() {
   if (!project) return;
