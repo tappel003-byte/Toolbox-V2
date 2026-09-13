@@ -1,10 +1,24 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { Floor, ProjectMeta, SurveyPoint } from "./types";
 
+// Toolbox cabinet integration: when opened as .../index.html?job=<key>, this
+// tags whichever project gets created/edited here to that Toolbox customer
+// (so the same-origin, unscoped "floor-survey" project list only ever shows
+// that customer's own project — the list/setup UI itself is untouched, it's
+// just fed a filtered result), and mirrors that project's floors + points
+// into the shared job record after every save, in the same shape the
+// .floorsurvey.json importer already produces. This app's own "floor-survey"
+// database remains the source of truth and keeps working standalone; the
+// mirror is an additional write, never a replacement.
+const TOOLBOX_JOB_KEY: string | null =
+  typeof location !== "undefined" ? new URLSearchParams(location.search).get("job") : null;
+
+type StoredProjectMeta = ProjectMeta & { toolboxJobKey?: string };
+
 interface FloorSurveyDB extends DBSchema {
   projects: {
     key: string;
-    value: ProjectMeta;
+    value: StoredProjectMeta;
     indexes: { updatedAt: number };
   };
   floors: {
@@ -56,15 +70,20 @@ function getDB() {
 }
 
 // Projects
+function forThisJob(p: StoredProjectMeta): boolean {
+  // No ?job= (standalone use) — unfiltered, exactly as before.
+  if (!TOOLBOX_JOB_KEY) return true;
+  return p.toolboxJobKey === TOOLBOX_JOB_KEY;
+}
 export async function listProjects(): Promise<ProjectMeta[]> {
   const db = await getDB();
   const all = await db.getAll("projects");
-  return all.filter((p) => !p.deletedAt).sort((a, b) => b.updatedAt - a.updatedAt);
+  return all.filter((p) => !p.deletedAt && forThisJob(p)).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 export async function listTrashedProjects(): Promise<ProjectMeta[]> {
   const db = await getDB();
   const all = await db.getAll("projects");
-  return all.filter((p) => !!p.deletedAt).sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0));
+  return all.filter((p) => !!p.deletedAt && forThisJob(p)).sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0));
 }
 export async function trashProject(id: string) {
   const db = await getDB();
@@ -86,7 +105,12 @@ export async function getProject(id: string) {
 }
 export async function saveProject(p: ProjectMeta) {
   const db = await getDB();
-  await db.put("projects", { ...p, updatedAt: Date.now() });
+  const existing = await db.get("projects", p.id);
+  // First save while a Toolbox job is open adopts this project for that job;
+  // once tagged, it stays tagged (never silently reassigned to another job).
+  const toolboxJobKey = existing?.toolboxJobKey ?? (TOOLBOX_JOB_KEY || undefined);
+  await db.put("projects", { ...p, toolboxJobKey, updatedAt: Date.now() });
+  mirrorProjectToJobPocket(p.id);
 }
 export async function markProjectExported(id: string) {
   const db = await getDB();
@@ -112,12 +136,15 @@ export async function listFloors(projectId: string): Promise<Floor[]> {
 export async function saveFloor(f: Floor) {
   const db = await getDB();
   await db.put("floors", { ...f, updatedAt: Date.now() });
+  mirrorProjectToJobPocket(f.projectId);
 }
 export async function deleteFloor(id: string) {
   const db = await getDB();
+  const floor = await db.get("floors", id);
   const points = await listPoints(id);
   for (const p of points) await db.delete("points", p.id);
   await db.delete("floors", id);
+  if (floor) mirrorProjectToJobPocket(floor.projectId);
 }
 
 // Points
@@ -129,10 +156,17 @@ export async function listPoints(floorId: string): Promise<SurveyPoint[]> {
 export async function savePoint(p: SurveyPoint) {
   const db = await getDB();
   await db.put("points", p);
+  const floor = await db.get("floors", p.floorId);
+  if (floor) mirrorProjectToJobPocket(floor.projectId);
 }
 export async function deletePoint(id: string) {
   const db = await getDB();
+  const point = await db.get("points", id);
   await db.delete("points", id);
+  if (point) {
+    const floor = await db.get("floors", point.floorId);
+    if (floor) mirrorProjectToJobPocket(floor.projectId);
+  }
 }
 
 /** Reassign sequential indexes (1..N) to points on a floor, ordered by current index. */
@@ -154,4 +188,54 @@ export async function reindexFloorPoints(floorId: string): Promise<SurveyPoint[]
 
 export function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+// ---------- Toolbox cabinet integration (dual-write) ----------
+// Same-origin access to Toolbox's shared job pocket (js/db.js:
+// 'sandia-job-pocket' / store 'jobs' / keyPath 'addressKey'), reimplemented
+// here against the raw IndexedDB API rather than importing that plain script
+// as an ES module, so this file stays a self-contained module. Same DB name
+// and version — this opens the exact same underlying browser database.
+interface JobPocketDB extends DBSchema {
+  jobs: { key: string; value: Record<string, unknown> };
+}
+let jobPocketPromise: Promise<IDBPDatabase<JobPocketDB>> | null = null;
+function getJobPocket() {
+  if (!jobPocketPromise) {
+    jobPocketPromise = openDB<JobPocketDB>("sandia-job-pocket", 1, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains("jobs")) {
+          db.createObjectStore("jobs", { keyPath: "addressKey" });
+        }
+      },
+    });
+  }
+  return jobPocketPromise;
+}
+
+let mirrorChain: Promise<void> = Promise.resolve();
+function mirrorProjectToJobPocket(projectId: string) {
+  if (!TOOLBOX_JOB_KEY) return;
+  mirrorChain = mirrorChain.then(async () => {
+    try {
+      const db = await getDB();
+      const project = await db.get("projects", projectId);
+      // Never mirror a project that belongs to a different job (or none) —
+      // dual-write only applies to the project actually adopted by this job.
+      if (!project || project.toolboxJobKey !== TOOLBOX_JOB_KEY) return;
+      const floors = await listFloors(projectId);
+      const points: SurveyPoint[] = [];
+      for (const f of floors) points.push(...(await listPoints(f.id)));
+
+      const pocket = await getJobPocket();
+      const job = await pocket.get("jobs", TOOLBOX_JOB_KEY);
+      if (!job) return;
+      const existingFloorSurvey = (job.floorSurvey as Record<string, unknown>) || {};
+      job.floorSurvey = { ...existingFloorSurvey, floors, points, updatedAt: Date.now() };
+      job.updatedAt = Date.now();
+      await pocket.put("jobs", job);
+    } catch (e) {
+      console.warn("Toolbox dual-write failed (local save is unaffected):", e);
+    }
+  });
 }
