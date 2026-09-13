@@ -50,6 +50,31 @@
   .diag-hint-dark { color: rgba(255,255,255,0.45); font-size: 10px; line-height: 1.4; margin-top: 8px; }
 
   .diag-toolbar { display: flex; gap: 10px; }
+
+  .diag-screen-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .diag-screen-tabs button { flex: 1; }
+  .diag-screen-tabs button.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  .diag-tilt-viewport {
+    position: relative;
+    height: min(62vh, 560px);
+    min-height: 280px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+  .diag-tilt-viewport canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+  .diag-tilt-results { padding: 12px 0; }
+  .diag-tilt-results .row-line { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  .diag-tilt-thresholds { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .diag-tilt-thresholds span {
+    font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--panel);
+    border: 1px solid var(--line); color: var(--ink-soft);
+  }
+  .diag-tilt-thresholds span.near { border-color: var(--accent); color: var(--accent); font-weight: 700; }
 </style>
 </head>
 <body>
@@ -67,21 +92,37 @@
   </div>
 
   <div id="diag-body">
-    <div class="diag-viewport">
-      <div id="diag-mount" class="diag-mount"></div>
-      <div id="diag-status" class="diag-status">Building surface…</div>
-      <div id="diag-panel" class="diag-panel" style="display:none;">
-        <div class="diag-panel-row">
-          <label for="f-exaggeration">Height exaggeration · <span id="exaggeration-value">3.0</span>×</label>
-          <input type="range" id="f-exaggeration" min="0.5" max="20" step="0.1" value="3">
+    <div id="diag-screen-tabs" class="diag-screen-tabs" style="display:none;">
+      <button type="button" id="btn-screen-3d" class="btn active">3D View</button>
+      <button type="button" id="btn-screen-tilt" class="btn">Tilt / Deflection</button>
+    </div>
+
+    <div id="diag-3d-view">
+      <div class="diag-viewport">
+        <div id="diag-mount" class="diag-mount"></div>
+        <div id="diag-status" class="diag-status">Building surface…</div>
+        <div id="diag-panel" class="diag-panel" style="display:none;">
+          <div class="diag-panel-row">
+            <label for="f-exaggeration">Height exaggeration · <span id="exaggeration-value">3.0</span>×</label>
+            <input type="range" id="f-exaggeration" min="0.5" max="20" step="0.1" value="3">
+          </div>
+          <div class="diag-panel-row toggle-row">
+            <label for="f-show-points" style="margin:0;">Show survey points</label>
+            <input type="checkbox" id="f-show-points">
+          </div>
+          <div class="diag-hint-dark">Drag to orbit · scroll to zoom · right-drag to pan</div>
         </div>
-        <div class="diag-panel-row toggle-row">
-          <label for="f-show-points" style="margin:0;">Show survey points</label>
-          <input type="checkbox" id="f-show-points">
-        </div>
-        <div class="diag-hint-dark">Drag to orbit · scroll to zoom · right-drag to pan</div>
       </div>
     </div>
+
+    <div id="diag-tilt-view" style="display:none;">
+      <div class="hint" style="margin-top:0;">Tap a point, then tap a second point to draw a line between them. β = δ/L along that line, plus a deflection ratio if other points fall on it too.</div>
+      <div class="diag-tilt-viewport">
+        <canvas id="diag-tilt-canvas"></canvas>
+      </div>
+      <div id="diag-tilt-results" class="diag-tilt-results"></div>
+    </div>
+
     <div class="diag-toolbar">
       <button type="button" id="btn-export-png" class="btn" disabled>Capture</button>
     </div>

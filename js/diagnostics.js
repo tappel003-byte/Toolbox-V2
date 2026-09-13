@@ -15,6 +15,7 @@ let diagJob = null;
 let diagJobKey = null;
 let diagFloors = [];
 let diagPoints = [];
+let diagActiveScreen = '3d';
 
 let renderer, scene, camera, controls, mesh, pointsGroup;
 let baseZ = null;
@@ -23,6 +24,22 @@ let currentGrid = null;
 let currentActivePoints = [];
 let animationFrame = 0;
 let resizeObserver = null;
+
+// ---------- Tilt / Deflection screen ----------
+// Second Diagnostics view: user picks two existing survey points to define a
+// line; β = δ/L along that line, plus a deflection ratio (max residual from
+// the straight line / span) when other points fall on the same line. Reuses
+// the same corrected-value math as the 3D view (floor-survey-math.js) so the
+// numbers agree with what Floor Survey itself reports.
+const TILT_THRESHOLD_DENOMS = [500, 300, 150];
+let tiltCanvas = null;
+let tiltCtx = null;
+let tiltResizeObserver = null;
+let tiltFloor = null;
+let tiltPointsAll = [];
+let tiltSelected = []; // up to 2 point ids
+let tiltLineResult = null;
+let tiltTransform = null;
 
 function pointInsideAnyExclusion(p, exclusions) {
   return (exclusions || []).some((ex) => topoPointInPolygon(p.x, p.y, ex.polygon));
@@ -274,7 +291,14 @@ function populateFloorPicker() {
     .sort((a, b) => (a.order || 0) - (b.order || 0))
     .map((f) => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.name || 'Floor')}</option>`)
     .join('');
-  sel.addEventListener('change', () => buildMeshForFloor(selectedFloor()));
+  sel.addEventListener('change', () => {
+    const floor = selectedFloor();
+    if (diagActiveScreen === 'tilt') {
+      setTiltFloor(floor);
+    } else {
+      buildMeshForFloor(floor);
+    }
+  });
 }
 
 // Composes the 3D view's canvas onto a white-backed canvas with a margin,
@@ -296,7 +320,7 @@ function padCanvasWithWhiteMargin(sourceCanvas, marginPx) {
 // without an import step. Diagnostics' own storage (the local download) is
 // unaffected; this is an additional write, never a replacement, and is the
 // only field this file ever writes — floor/pin data stays untouched.
-function saveDiagnosticsExhibit(canvas, label) {
+function saveDiagnosticsExhibit(canvas, label, source) {
   if (!diagJobKey || typeof getJob !== 'function' || typeof saveJob !== 'function') return;
   canvas.toBlob(async (blob) => {
     if (!blob) return;
@@ -307,7 +331,7 @@ function saveDiagnosticsExhibit(canvas, label) {
       job.exhibits.push({
         id: 'exhibit_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
         createdAt: Date.now(),
-        source: 'diagnostics-3d',
+        source: source || 'diagnostics-3d',
         label,
         mimeType: 'image/png',
         blob,
@@ -317,6 +341,305 @@ function saveDiagnosticsExhibit(canvas, label) {
       console.warn('Toolbox exhibit save failed (local download is unaffected):', e);
     }
   }, 'image/png');
+}
+
+// ---------- Tilt / Deflection: canvas + math ----------
+
+function buildTiltPointsForFloor(floor) {
+  return diagPoints
+    .filter((p) => p.floorId === floor.id)
+    .map((p) => ({
+      id: p.id,
+      x: p.x,
+      y: p.y,
+      label: p.label || '',
+      value: correctedPointValue(p, floor.transitions, floor.transitionGroupAverages),
+    }));
+}
+
+function computeTiltTransform(points, boundary, cssW, cssH) {
+  const xs = [];
+  const ys = [];
+  (boundary || []).forEach((b) => { xs.push(b.x); ys.push(b.y); });
+  points.forEach((p) => { xs.push(p.x); ys.push(p.y); });
+  if (!xs.length || !cssW || !cssH) return null;
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+  const padX = spanX * 0.08;
+  const padY = spanY * 0.08;
+  const fitW = spanX + padX * 2;
+  const fitH = spanY + padY * 2;
+  const scale = Math.min(cssW / fitW, cssH / fitH);
+  const offsetX = (cssW - fitW * scale) / 2 - (minX - padX) * scale;
+  const offsetY = (cssH - fitH * scale) / 2 - (minY - padY) * scale;
+  return { scale, offsetX, offsetY };
+}
+
+function planToCanvas(pt, t) {
+  return { x: pt.x * t.scale + t.offsetX, y: pt.y * t.scale + t.offsetY };
+}
+
+// Two selected points define a line (A -> B). δ/L along that line is β.
+// Any other points within a small perpendicular tolerance of the line are
+// treated as lying on it; with 3+ such points, the deflection ratio is the
+// largest residual from the straight A-B line (over the intermediate
+// points) divided by the A-B span — the usual beam-deflection reading.
+function computeTiltLine(idA, idB) {
+  const a = tiltPointsAll.find((p) => p.id === idA);
+  const b = tiltPointsAll.find((p) => p.id === idB);
+  if (!a || !b) return null;
+  const pixelLen = Math.hypot(b.x - a.x, b.y - a.y);
+  if (pixelLen < 1e-6) return null;
+
+  const scaleInfo = tiltFloor && tiltFloor.scale;
+  let inchesPerPixel = null;
+  if (scaleInfo && scaleInfo.a && scaleInfo.b && scaleInfo.lengthInches) {
+    const calPixelLen = Math.hypot(scaleInfo.b.x - scaleInfo.a.x, scaleInfo.b.y - scaleInfo.a.y);
+    if (calPixelLen > 1e-6) inchesPerPixel = scaleInfo.lengthInches / calPixelLen;
+  }
+  const hasScale = !!inchesPerPixel;
+  const realLenInches = hasScale ? pixelLen * inchesPerPixel : null;
+  const deltaValue = Math.abs(b.value - a.value);
+  const beta = hasScale ? deltaValue / realLenInches : null;
+
+  const dx = (b.x - a.x) / pixelLen;
+  const dy = (b.y - a.y) / pixelLen;
+  const tolerancePx = Math.max(pixelLen * 0.05, 8);
+  const near = [];
+  for (const p of tiltPointsAll) {
+    const vx = p.x - a.x;
+    const vy = p.y - a.y;
+    const proj = vx * dx + vy * dy;
+    const perp = Math.abs(vx * dy - vy * dx);
+    if (perp <= tolerancePx && proj >= -tolerancePx && proj <= pixelLen + tolerancePx) {
+      near.push({ ...p, t: proj / pixelLen });
+    }
+  }
+  near.sort((x, y) => x.t - y.t);
+
+  let deflection = null;
+  if (hasScale && near.length >= 3) {
+    let maxResidual = 0;
+    for (const p of near) {
+      const expected = a.value + (b.value - a.value) * p.t;
+      maxResidual = Math.max(maxResidual, Math.abs(p.value - expected));
+    }
+    deflection = maxResidual / realLenInches;
+  }
+
+  return { a, b, pixelLen, realLenInches, hasScale, deltaValue, beta, nearPoints: near, deflection };
+}
+
+function resizeTiltCanvas() {
+  if (!tiltCanvas) return;
+  const viewport = tiltCanvas.parentElement;
+  const w = viewport.clientWidth;
+  const h = viewport.clientHeight;
+  if (!w || !h) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  tiltCanvas.width = Math.round(w * dpr);
+  tiltCanvas.height = Math.round(h * dpr);
+  tiltCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  renderTiltCanvas();
+}
+
+function renderTiltCanvas() {
+  if (!tiltCtx || !tiltCanvas) return;
+  const cssW = tiltCanvas.parentElement.clientWidth;
+  const cssH = tiltCanvas.parentElement.clientHeight;
+  tiltCtx.clearRect(0, 0, cssW, cssH);
+  tiltCtx.fillStyle = '#ffffff';
+  tiltCtx.fillRect(0, 0, cssW, cssH);
+
+  if (!tiltFloor || !tiltPointsAll.length) {
+    tiltTransform = null;
+    tiltCtx.fillStyle = '#8a8378';
+    tiltCtx.font = '13px system-ui, sans-serif';
+    tiltCtx.textAlign = 'center';
+    tiltCtx.fillText('No survey points on this floor.', cssW / 2, cssH / 2);
+    return;
+  }
+
+  tiltTransform = computeTiltTransform(tiltPointsAll, tiltFloor.boundary, cssW, cssH);
+  const t = tiltTransform;
+  if (!t) return;
+
+  if (tiltFloor.boundary && tiltFloor.boundary.length >= 3) {
+    tiltCtx.beginPath();
+    tiltFloor.boundary.forEach((pt, i) => {
+      const c = planToCanvas(pt, t);
+      if (i === 0) tiltCtx.moveTo(c.x, c.y); else tiltCtx.lineTo(c.x, c.y);
+    });
+    tiltCtx.closePath();
+    tiltCtx.strokeStyle = '#d8d2c4';
+    tiltCtx.lineWidth = 1;
+    tiltCtx.stroke();
+  }
+
+  const selectedPts = tiltSelected.map((id) => tiltPointsAll.find((p) => p.id === id)).filter(Boolean);
+  const nearIds = new Set(selectedPts.length === 2 && tiltLineResult ? tiltLineResult.nearPoints.map((p) => p.id) : []);
+
+  if (selectedPts.length === 2) {
+    const ca = planToCanvas(selectedPts[0], t);
+    const cb = planToCanvas(selectedPts[1], t);
+    tiltCtx.beginPath();
+    tiltCtx.moveTo(ca.x, ca.y);
+    tiltCtx.lineTo(cb.x, cb.y);
+    tiltCtx.strokeStyle = '#2a6f4b';
+    tiltCtx.lineWidth = 2;
+    tiltCtx.stroke();
+  }
+
+  for (const p of tiltPointsAll) {
+    const c = planToCanvas(p, t);
+    const isSelected = tiltSelected.includes(p.id);
+    const isNear = nearIds.has(p.id) && !isSelected;
+    tiltCtx.beginPath();
+    tiltCtx.arc(c.x, c.y, isSelected ? 7 : 5, 0, Math.PI * 2);
+    tiltCtx.fillStyle = isSelected ? '#2a6f4b' : (isNear ? '#c98a2c' : '#5b5346');
+    tiltCtx.fill();
+    if (isSelected) {
+      tiltCtx.lineWidth = 2;
+      tiltCtx.strokeStyle = '#ffffff';
+      tiltCtx.stroke();
+    }
+    if (p.label) {
+      tiltCtx.fillStyle = '#3a352c';
+      tiltCtx.font = '11px system-ui, sans-serif';
+      tiltCtx.textAlign = 'left';
+      tiltCtx.fillText(p.label, c.x + 9, c.y - 9);
+    }
+  }
+}
+
+function formatRatio(x) {
+  if (!isFinite(x) || x <= 0) return '—';
+  const denom = Math.round(1 / x);
+  if (denom > 9999) return '< 1 / 9999 (negligible)';
+  return `1 / ${denom}`;
+}
+
+function renderTiltResults() {
+  const el = document.getElementById('diag-tilt-results');
+  if (!el) return;
+
+  if (!tiltPointsAll.length) {
+    el.innerHTML = '';
+    return;
+  }
+  if (!tiltSelected.length) {
+    el.innerHTML = '<div class="hint" style="margin:0;">Tap a survey point to start a line.</div>';
+    return;
+  }
+  if (tiltSelected.length === 1) {
+    const p = tiltPointsAll.find((x) => x.id === tiltSelected[0]);
+    el.innerHTML = `<div class="hint" style="margin:0;">Line start: ${escapeHtml(p && p.label ? p.label : 'point')}. Tap a second point.</div>`;
+    return;
+  }
+
+  const r = tiltLineResult;
+  if (!r) { el.innerHTML = ''; return; }
+
+  const rows = [];
+  rows.push(`<div class="row-line"><span>Points</span><strong>${escapeHtml(r.a.label || 'A')} → ${escapeHtml(r.b.label || 'B')}</strong></div>`);
+  rows.push(`<div class="row-line"><span>Span (L)</span><strong>${r.hasScale ? r.realLenInches.toFixed(1) + ' in' : r.pixelLen.toFixed(0) + ' px — no scale set'}</strong></div>`);
+  rows.push(`<div class="row-line"><span>Δ reading</span><strong>${r.deltaValue.toFixed(3)}</strong></div>`);
+
+  let primaryRatio = null;
+  if (r.hasScale) {
+    rows.push(`<div class="row-line"><span>β = δ/L (tilt)</span><strong>${formatRatio(r.beta)}</strong></div>`);
+    if (r.deflection != null) {
+      rows.push(`<div class="row-line"><span>Deflection ratio (Δ/L, ${r.nearPoints.length} pts on line)</span><strong>${formatRatio(r.deflection)}</strong></div>`);
+      primaryRatio = r.deflection;
+    } else {
+      rows.push('<div class="row-line"><span>Deflection ratio</span><strong>No other points fall on this line</strong></div>');
+      primaryRatio = r.beta;
+    }
+  } else {
+    rows.push('<div class="row-line"><span>β / deflection ratio</span><strong>Set a scale in Floor Survey to compute</strong></div>');
+  }
+
+  const pills = TILT_THRESHOLD_DENOMS.map((denom) => {
+    let near = false;
+    if (primaryRatio) {
+      const thresholdRatio = 1 / denom;
+      near = primaryRatio >= thresholdRatio / 1.6 && primaryRatio <= thresholdRatio * 1.6;
+    }
+    return `<span class="${near ? 'near' : ''}">1/${denom}</span>`;
+  }).join('');
+
+  el.innerHTML = `
+    ${rows.join('')}
+    <div class="diag-tilt-thresholds">${pills}</div>
+    <div class="hint" style="margin-top:10px;">Reference only — not a structural or legal determination.</div>
+  `;
+}
+
+function onTiltCanvasClick(evt) {
+  if (!tiltTransform || !tiltPointsAll.length) return;
+  const rect = tiltCanvas.getBoundingClientRect();
+  const cx = evt.clientX - rect.left;
+  const cy = evt.clientY - rect.top;
+  let best = null;
+  let bestDist = Infinity;
+  for (const p of tiltPointsAll) {
+    const c = planToCanvas(p, tiltTransform);
+    const d = Math.hypot(c.x - cx, c.y - cy);
+    if (d < bestDist) { bestDist = d; best = p; }
+  }
+  const HIT_RADIUS = 22;
+  if (!best || bestDist > HIT_RADIUS) {
+    tiltSelected = [];
+    tiltLineResult = null;
+  } else if (tiltSelected.length === 2) {
+    tiltSelected = [best.id];
+    tiltLineResult = null;
+  } else if (tiltSelected.includes(best.id)) {
+    tiltSelected = tiltSelected.filter((id) => id !== best.id);
+    tiltLineResult = null;
+  } else {
+    tiltSelected.push(best.id);
+    if (tiltSelected.length === 2) tiltLineResult = computeTiltLine(tiltSelected[0], tiltSelected[1]);
+  }
+  renderTiltCanvas();
+  renderTiltResults();
+}
+
+function initTiltCanvas() {
+  tiltCanvas = document.getElementById('diag-tilt-canvas');
+  tiltCtx = tiltCanvas.getContext('2d');
+  tiltCanvas.addEventListener('click', onTiltCanvasClick);
+  tiltResizeObserver = new ResizeObserver(resizeTiltCanvas);
+  tiltResizeObserver.observe(tiltCanvas.parentElement);
+  resizeTiltCanvas();
+}
+
+function setTiltFloor(floor) {
+  tiltFloor = floor;
+  tiltPointsAll = buildTiltPointsForFloor(floor);
+  tiltSelected = [];
+  tiltLineResult = null;
+  if (!tiltCanvas) initTiltCanvas(); else resizeTiltCanvas();
+  renderTiltResults();
+  document.getElementById('btn-export-png').disabled = tiltPointsAll.length === 0;
+}
+
+function setDiagScreen(screen) {
+  const is3d = screen === '3d';
+  document.getElementById('diag-3d-view').style.display = is3d ? '' : 'none';
+  document.getElementById('diag-tilt-view').style.display = is3d ? 'none' : '';
+  document.getElementById('btn-screen-3d').classList.toggle('active', is3d);
+  document.getElementById('btn-screen-tilt').classList.toggle('active', !is3d);
+  diagActiveScreen = screen;
+  if (is3d) {
+    document.getElementById('btn-export-png').disabled = !mesh;
+  } else {
+    setTiltFloor(selectedFloor());
+  }
 }
 
 async function loadDiagnostics() {
@@ -354,6 +677,10 @@ async function loadDiagnostics() {
   diagFloors = fs.floors;
   diagPoints = fs.points || [];
 
+  document.getElementById('diag-screen-tabs').style.display = 'flex';
+  document.getElementById('btn-screen-3d').addEventListener('click', () => setDiagScreen('3d'));
+  document.getElementById('btn-screen-tilt').addEventListener('click', () => setDiagScreen('tilt'));
+
   populateFloorPicker();
   initThree();
   buildMeshForFloor(selectedFloor());
@@ -363,8 +690,26 @@ async function loadDiagnostics() {
     if (pointsGroup) pointsGroup.visible = e.target.checked;
   });
   document.getElementById('btn-export-png').addEventListener('click', () => {
-    renderer.render(scene, camera);
     const floor = selectedFloor();
+
+    if (diagActiveScreen === 'tilt') {
+      if (!tiltCanvas) return;
+      const padded = padCanvasWithWhiteMargin(tiltCanvas, DIAG_EXHIBIT_MARGIN_PX);
+      const dataUrl = padded.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `${(floor.name || 'floor').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-tilt.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // Toolbox cabinet integration: also store this capture as a Report
+      // Builder exhibit — the customer folder, not just a file on the phone.
+      saveDiagnosticsExhibit(padded, `${floor.name || 'Floor'} — Tilt / Deflection`, 'diagnostics-tilt');
+      return;
+    }
+
+    renderer.render(scene, camera);
     const padded = padCanvasWithWhiteMargin(renderer.domElement, DIAG_EXHIBIT_MARGIN_PX);
 
     // Local download — unchanged behavior, now from the padded/exhibit-ready image.
@@ -378,7 +723,7 @@ async function loadDiagnostics() {
 
     // Toolbox cabinet integration: also store this capture as a Report
     // Builder exhibit — the customer folder, not just a file on the phone.
-    saveDiagnosticsExhibit(padded, `${floor.name || 'Floor'} — 3D view`);
+    saveDiagnosticsExhibit(padded, `${floor.name || 'Floor'} — 3D view`, 'diagnostics-3d');
   });
 }
 
