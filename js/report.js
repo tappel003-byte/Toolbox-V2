@@ -297,8 +297,8 @@ async function loadReport() {
   if (!floorSection && !pinSection) {
     body.innerHTML = `
       <div class="empty-state">
-        No drawer data imported for this customer yet.<br>
-        Go to their hub and import a Distress Survey pins.csv or a Floor Survey .floorsurvey.json to see it here.
+        No Distress Survey or Floor Survey data for this customer yet.<br>
+        Capture one in its drawer, or import a pins.csv / .floorsurvey.json from their hub.
       </div>`;
     return;
   }
