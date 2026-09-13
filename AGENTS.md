@@ -21,3 +21,13 @@ Reason (2026-09-12): a prior agent rebuilt those screens, said it had not, and w
 - Skipping setup
 - “While I’m here” refactors of frozen files
 - Treating chat as proof the UI is unchanged — the diff is the proof
+
+## Approved freeze exception (2026-09-13)
+Export→Edit on the Export screen/tab is approved: each drawer's existing Export
+surface (`distress/survey.html`'s Export sheet; Floor's `ExportTab.tsx`) may be
+repurposed into a desktop-oriented editor for that drawer's own data
+(descriptions, room/label, notes, and plan position) in addition to its
+existing export/download functions. Capture UX everywhere else — setup, the
+bottom sheet, stacked pins, the keypad, the Interior/Exterior default, photo
+annotation, theme, and Report Builder's read-only rule — remains frozen and
+was not touched by this exception.

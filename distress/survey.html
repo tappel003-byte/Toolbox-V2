@@ -918,12 +918,23 @@
   <div class="grab"></div>
   <div class="sheet-head">
     <div>
-      <div class="sheet-title">Export</div>
+      <div class="sheet-title">Export &amp; Edit</div>
       <div class="sheet-sub" id="exportSub">Picture map + descriptions</div>
     </div>
     <button class="ghost" onclick="closeSheets()">Cancel</button>
   </div>
   <div id="exportBody" style="padding:8px 0 4px">
+    <!-- Toolbox cabinet integration: this sheet used to be export-only. Tim
+         approved (2026-09-13) repurposing its unused real estate into a
+         desktop-oriented editor for this project's pins — description,
+         room, and plan position — all in one place instead of one pin at a
+         time in the capture sheet. The capture sheet (#pinSheet) itself is
+         untouched; this is an additional, parallel editing surface. -->
+    <div class="sheet-sub" style="font-weight:700;color:var(--ink);font-size:14px;margin-bottom:8px;">Edit Pins</div>
+    <div id="editPinsEmpty" class="sheet-sub" style="display:none;padding:10px 0;">No pins yet.</div>
+    <div id="editPinsList"></div>
+    <div style="border-top:1px solid var(--line);margin:16px 0 14px;"></div>
+    <div class="sheet-sub" style="font-weight:700;color:var(--ink);font-size:14px;margin-bottom:8px;">Export</div>
     <button class="primary-btn" id="exportZipBtn" onclick="exportProjectZip()">
       📦 Download Project (ZIP)
     </button>
@@ -6007,8 +6018,79 @@ function openExport() {
   document.getElementById('exportVmNote').style.display = vmCount ? '' : 'none';
   const extras = (qcCount ? ' + ' + qcCount + ' Quick Capture' : '') + (vmCount ? ' + ' + vmCount + ' voice memo' + (vmCount===1?'':'s') : '');
   document.getElementById('exportSub').textContent = (isInternal ? 'Map + pin list + photos' : 'Map + pin list') + extras;
+  renderEditPinsList();
   document.getElementById('scrim').classList.add('active');
   document.getElementById('exportSheet').classList.add('open');
+}
+
+// ---------- Toolbox cabinet integration (Export -> Edit) ----------
+// Desktop-oriented editor for this project's pins, living in the repurposed
+// Export sheet. Internal-mode only, matching the shape Report/Diagnostics
+// already understand. Position is edited as a 0-100 percentage of the plan
+// (easier to type than raw pixels), converted to/from the pin's stored
+// pixel coordinates. Every edit calls saveProject(), the same function
+// capture already uses, so local save and the existing dual-write mirror
+// both fire exactly as they do for any other pin change.
+function renderEditPinsList() {
+  const list = document.getElementById('editPinsList');
+  const empty = document.getElementById('editPinsEmpty');
+  if (!project || project.mode !== 'internal') {
+    list.innerHTML = '';
+    empty.textContent = project ? 'Editing is only available for internal (interior) surveys.' : '';
+    empty.style.display = project ? '' : 'none';
+    return;
+  }
+  const pins = (project.pins || []).slice().sort((a, b) => (a.num || 0) - (b.num || 0));
+  if (!pins.length) {
+    list.innerHTML = '';
+    empty.textContent = 'No pins yet.';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  const planW = project.plan.width, planH = project.plan.height;
+  list.innerHTML = pins.map((p) => {
+    const xPct = planW ? (p.x / planW * 100).toFixed(1) : '0';
+    const yPct = planH ? (p.y / planH * 100).toFixed(1) : '0';
+    return `
+      <div class="edit-pin-row" data-pin-id="${escapeHtml(p.id)}" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="flex:none;width:26px;height:26px;border-radius:50%;background:${p.isExterior ? 'var(--muted)' : 'var(--accent)'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">${p.num || ''}</span>
+          <input type="text" class="edit-pin-room" placeholder="Room" value="${escapeHtml(p.location || '')}" style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;">
+        </div>
+        <textarea class="desc-area edit-pin-desc" spellcheck="true" placeholder="Describe what you see…" style="min-height:60px;">${escapeHtml(p.description || '')}</textarea>
+        <div style="display:flex;gap:14px;margin-top:8px;align-items:center;">
+          <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;">X %
+            <input type="number" class="edit-pin-x" min="0" max="100" step="0.1" value="${xPct}" style="width:70px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;">
+          </label>
+          <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;">Y %
+            <input type="number" class="edit-pin-y" min="0" max="100" step="0.1" value="${yPct}" style="width:70px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;">
+          </label>
+        </div>
+      </div>`;
+  }).join('');
+
+  list.querySelectorAll('.edit-pin-row').forEach((row) => {
+    const id = row.getAttribute('data-pin-id');
+    const commit = () => {
+      const p = (project.pins || []).find((pp) => pp.id === id);
+      if (!p) return;
+      const room = row.querySelector('.edit-pin-room').value.trim();
+      const desc = row.querySelector('.edit-pin-desc').value;
+      const xPct = parseFloat(row.querySelector('.edit-pin-x').value);
+      const yPct = parseFloat(row.querySelector('.edit-pin-y').value);
+      p.location = room || null;
+      p.description = desc;
+      if (isFinite(xPct)) p.x = Math.max(0, Math.min(100, xPct)) / 100 * planW;
+      if (isFinite(yPct)) p.y = Math.max(0, Math.min(100, yPct)) / 100 * planH;
+      saveProject();
+      renderPins();
+    };
+    row.querySelector('.edit-pin-room').addEventListener('change', commit);
+    row.querySelector('.edit-pin-desc').addEventListener('change', commit);
+    row.querySelector('.edit-pin-x').addEventListener('change', commit);
+    row.querySelector('.edit-pin-y').addEventListener('change', commit);
+  });
 }
 
 // Render the plan + overlays to a canvas at high res for PDF embedding

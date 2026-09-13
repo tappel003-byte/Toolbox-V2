@@ -1,11 +1,14 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Download } from "lucide-react";
 import type { Floor, ProjectMeta, RenderSettings, SurveyPoint } from "@/lib/types";
 import { zoneOfXY } from "@/lib/exclusions";
 import { buildAreaTopos, renderTopo, resolveSettings } from "./TopoTab";
 import { canvasToPdfBlob } from "@/lib/pdf";
+import { savePoint } from "@/lib/db";
 
 interface Props {
   project: ProjectMeta;
@@ -23,6 +26,30 @@ export function ExportTab({ project, floor, points, settings }: Props) {
   const [status, setStatus] = useState<string>("");
   const [pointsOnly, setPointsOnly] = useState(false);
   const previewRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Toolbox cabinet integration: Tim approved (2026-09-13) repurposing this
+  // tab's unused real estate into a desktop-oriented editor for this
+  // floor's points — the same fields the CSV export above already
+  // surfaces (label, value, notes, x, y) — instead of only being able to
+  // read them out via a CSV download. savePoint() is the same function
+  // the Field tab uses, so local save and the existing dual-write mirror
+  // both fire exactly as they do for any other point edit. Kept as local
+  // state here (this file only) rather than lifted to the parent route,
+  // since this tab doesn't otherwise need to notify siblings of edits.
+  const [editablePoints, setEditablePoints] = useState<SurveyPoint[]>(points);
+  useEffect(() => {
+    setEditablePoints(points);
+  }, [points]);
+
+  function updateEditablePoint(id: string, patch: Partial<SurveyPoint>) {
+    setEditablePoints((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+
+  async function commitEditablePoint(id: string) {
+    const p = editablePoints.find((pp) => pp.id === id);
+    if (!p) return;
+    await savePoint(p);
+  }
   const resolved = resolveSettings(settings);
   const exportSettings = pointsOnly
     ? resolveSettings({
@@ -38,11 +65,11 @@ export function ExportTab({ project, floor, points, settings }: Props) {
 
   // One contour surface per drawn area (falls back to the legacy boundary).
   const areaTopos = useMemo(
-    () => buildAreaTopos(floor, points, resolved),
+    () => buildAreaTopos(floor, editablePoints, resolved),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       floor,
-      points,
+      editablePoints,
       resolved.firstContour,
       resolved.contourStep,
       resolved.contourCount,
@@ -74,16 +101,16 @@ export function ExportTab({ project, floor, points, settings }: Props) {
           ctx.globalAlpha = exportSettings.planOpacity;
           ctx.drawImage(img, 0, 0, imgW, imgH);
           ctx.globalAlpha = 1;
-          renderTopo(ctx, floor, points, exportSettings, areaTopos);
-          drawTitleBlock(ctx, imgW, imgH, project, floor, points);
+          renderTopo(ctx, floor, editablePoints, exportSettings, areaTopos);
+          drawTitleBlock(ctx, imgW, imgH, project, floor, editablePoints);
           resolve();
         };
         img.onerror = reject;
         img.src = floor.planDataUrl!;
       });
     } else {
-      renderTopo(ctx, floor, points, exportSettings, areaTopos);
-      drawTitleBlock(ctx, imgW, imgH, project, floor, points);
+      renderTopo(ctx, floor, editablePoints, exportSettings, areaTopos);
+      drawTitleBlock(ctx, imgW, imgH, project, floor, editablePoints);
       return Promise.resolve();
     }
   }
@@ -92,7 +119,7 @@ export function ExportTab({ project, floor, points, settings }: Props) {
     const safe = project.name.replace(/[^a-z0-9-]+/gi, "_");
     const rows: string[] = [];
     rows.push(["index", "label", "x", "y", "value", "role", "zone", "notes"].join(","));
-    for (const p of points) {
+    for (const p of editablePoints) {
       const role = p.isBasePoint ? "base-point" : "normal";
       const zone = zoneOfXY(p.x, p.y, floor.exclusions);
       const esc = (s: string) => `"${s.replace(/"/g, '""')}"`;
@@ -214,6 +241,92 @@ export function ExportTab({ project, floor, points, settings }: Props) {
             <Download className="h-4 w-4 mr-2" /> Export
           </Button>
         </div>
+      </div>
+      <div className="border-b p-3">
+        <div className="text-sm font-semibold mb-2">Edit Points</div>
+        {editablePoints.length === 0 ? (
+          <div className="text-xs text-muted-foreground">No points on this floor yet.</div>
+        ) : (
+          <div className="max-h-64 overflow-y-auto grid gap-2 pr-1">
+            {editablePoints
+              .slice()
+              .sort((a, b) => a.index - b.index)
+              .map((p) => {
+                const xPct = imgW ? Number(((p.x / imgW) * 100).toFixed(1)) : 0;
+                const yPct = imgH ? Number(((p.y / imgH) * 100).toFixed(1)) : 0;
+                return (
+                  <div key={p.id} className="rounded-md border p-2 flex flex-wrap items-start gap-2">
+                    <span className="flex-none w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center mt-1">
+                      {p.index}
+                    </span>
+                    <div className="flex-1 min-w-[120px]">
+                      <Label className="text-xs">Label</Label>
+                      <Input
+                        value={p.label ?? ""}
+                        onChange={(e) => updateEditablePoint(p.id, { label: e.target.value })}
+                        onBlur={() => commitEditablePoint(p.id)}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div className="w-24">
+                      <Label className="text-xs">Value (in)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={p.value}
+                        onChange={(e) => updateEditablePoint(p.id, { value: parseFloat(e.target.value) })}
+                        onBlur={() => commitEditablePoint(p.id)}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div className="w-20">
+                      <Label className="text-xs">X %</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min={0}
+                        max={100}
+                        value={xPct}
+                        onChange={(e) => {
+                          const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                          updateEditablePoint(p.id, { x: (pct / 100) * imgW });
+                        }}
+                        onBlur={() => commitEditablePoint(p.id)}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div className="w-20">
+                      <Label className="text-xs">Y %</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min={0}
+                        max={100}
+                        value={yPct}
+                        onChange={(e) => {
+                          const pct = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                          updateEditablePoint(p.id, { y: (pct / 100) * imgH });
+                        }}
+                        onBlur={() => commitEditablePoint(p.id)}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-[160px]">
+                      <Label className="text-xs">Notes</Label>
+                      <Textarea
+                        value={p.notes ?? ""}
+                        onChange={(e) => updateEditablePoint(p.id, { notes: e.target.value })}
+                        onBlur={() => commitEditablePoint(p.id)}
+                        className="min-h-8 text-sm resize-none"
+                        rows={1}
+                        spellCheck
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
       <div className="flex-1 min-h-0 overflow-auto bg-muted/30 p-4 flex justify-center items-start">
         <canvas
