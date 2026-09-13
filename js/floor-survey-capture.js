@@ -123,6 +123,7 @@ async function fsCreateFloor(name, planBlob) {
 function fsShowNewFloorForm() {
   document.getElementById('fs-new-floor-form').style.display = 'flex';
   document.getElementById('fs-floor-picker').style.display = 'none';
+  document.getElementById('fs-floor-actions').style.display = 'none';
   document.getElementById('fs-body').style.display = 'none';
   document.getElementById('f-fs-floor-name').value = '';
   document.getElementById('fs-new-plan-preview').innerHTML = '';
@@ -138,18 +139,54 @@ function fsHideNewFloorForm() {
 
 function fsRenderFloorPicker() {
   const wrap = document.getElementById('fs-floor-picker');
+  const actions = document.getElementById('fs-floor-actions');
   const sel = document.getElementById('f-fs-floor-select');
   const floors = fsNativeFloors().slice().sort((a, b) => (a.order || 0) - (b.order || 0));
   if (!floors.length) {
     wrap.style.display = 'none';
+    actions.style.display = 'none';
     return;
   }
   wrap.style.display = 'flex';
+  actions.style.display = 'flex';
   sel.innerHTML = floors.map((f) => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.name)}</option>`).join('');
   if (!fsSelectedFloorId || !floors.some((f) => f.id === fsSelectedFloorId)) {
     fsSelectedFloorId = floors[0].id;
   }
   sel.value = fsSelectedFloorId;
+}
+
+async function fsRenameFloor() {
+  const floor = fsFloor(fsSelectedFloorId);
+  if (!floor) return;
+  const name = prompt('Rename this floor', floor.name);
+  if (name == null) return; // cancelled
+  const trimmed = name.trim();
+  if (!trimmed) { showToast('Floor name cannot be blank'); return; }
+  floor.name = trimmed;
+  await fsSave();
+  fsRenderFloorPicker();
+}
+
+async function fsDeleteFloor() {
+  const floor = fsFloor(fsSelectedFloorId);
+  if (!floor) return;
+  if (!confirm(`Delete "${floor.name}" and all ${fsFloorPoints(floor.id).length} of its points? This can't be undone.`)) return;
+  const floors = fsAllFloors().filter((f) => f.id !== floor.id);
+  const points = fsAllPoints().filter((p) => p.floorId !== floor.id);
+  fsJob.floorSurvey = { ...(fsJob.floorSurvey || {}), floors, points };
+  fsSelectedFloorId = null;
+  fsSelectedPointId = null;
+  fsPendingBoundary = [];
+  fsDrawingExclusion = false;
+  fsPendingExclusion = [];
+  await fsSave();
+  if (fsNativeFloors().length) {
+    fsSelectedFloorId = fsNativeFloors().slice().sort((a, b) => (a.order || 0) - (b.order || 0))[0].id;
+    fsRenderAll();
+  } else {
+    fsShowNewFloorForm();
+  }
 }
 
 function fsRenderPlan() {
@@ -573,6 +610,8 @@ async function loadFloorSurveyCapture() {
 
   document.getElementById('fs-plan-wrap').addEventListener('click', fsHandlePlanClick);
   document.getElementById('btn-fs-new-floor').addEventListener('click', fsShowNewFloorForm);
+  document.getElementById('btn-fs-rename-floor').addEventListener('click', fsRenameFloor);
+  document.getElementById('btn-fs-delete-floor').addEventListener('click', fsDeleteFloor);
   document.getElementById('btn-fs-cancel-floor').addEventListener('click', () => {
     fsHideNewFloorForm();
     fsRenderAll();

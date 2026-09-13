@@ -618,3 +618,20 @@ Registered from `js/util.js` (already loaded on every screen) rather
 than repeating a script tag across all seven HTML pages. This is also
 the concrete piece discussed with Tim toward eventual installability —
 the manifest and icons were already in place; this was the missing half.
+
+## Floor Survey: a floor can finally be renamed or deleted
+
+Real gap, not hypothetical: a floor's name and plan photo were set once
+at creation with no way to fix a mistake afterward — no rename, no
+delete, ever. Added both. Rename is a plain prompt (matches the existing
+lightweight `confirm()`-based interactions elsewhere on this screen
+rather than a whole inline edit form). Delete cascades to the floor's
+own points (never leaves orphaned points referencing a floorId that no
+longer exists) and falls back to the "+ New Floor" form when it was the
+last floor left.
+
+Caught one real bug before it shipped: deleting the last floor left the
+Rename/Delete button row visibly showing (stale, since `fsShowNewFloorForm()`
+only ever hid the floor picker itself, never this newer row added
+alongside it) — fixed and specifically asserted against in the test
+rather than just eyeballing the happy path.

@@ -15,6 +15,7 @@
   .fs-floor-picker { display: flex; gap: 8px; margin-bottom: 14px; }
   .fs-floor-picker select { flex: 1; }
   .fs-floor-picker button { flex: none; }
+  #fs-floor-actions button { flex: 1; }
 
   .fs-new-floor { display: flex; flex-direction: column; gap: 10px; }
 
@@ -60,6 +61,11 @@
   <div id="fs-floor-picker" class="fs-floor-picker" style="display:none;">
     <select id="f-fs-floor-select"></select>
     <button type="button" id="btn-fs-new-floor" class="btn">+ New Floor</button>
+  </div>
+
+  <div id="fs-floor-actions" class="fs-floor-picker" style="display:none;margin-top:-6px;">
+    <button type="button" id="btn-fs-rename-floor" class="btn">Rename Floor</button>
+    <button type="button" id="btn-fs-delete-floor" class="btn btn-danger">Delete Floor</button>
   </div>
 
   <div id="fs-new-floor-form" class="card section-gap fs-new-floor" style="display:none;">
