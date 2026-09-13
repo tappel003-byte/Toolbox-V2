@@ -41,6 +41,18 @@ let tiltSelected = []; // up to 2 point ids
 let tiltLineResult = null;
 let tiltTransform = null;
 
+// ---------- Outlier / IQR screen ----------
+// Third Diagnostics view: robust-band outlier detection on the same
+// corrected elevation values as 3D/Tilt. Not a damage call — just which
+// readings sit outside Q1-1.5*IQR..Q3+1.5*IQR relative to the rest of the
+// survey (probable heave vs. settlement vs. the pack).
+let iqrCanvas = null;
+let iqrCtx = null;
+let iqrResizeObserver = null;
+let iqrFloor = null;
+let iqrPointsAll = [];
+let iqrStats = null;
+
 function pointInsideAnyExclusion(p, exclusions) {
   return (exclusions || []).some((ex) => topoPointInPolygon(p.x, p.y, ex.polygon));
 }
@@ -295,6 +307,8 @@ function populateFloorPicker() {
     const floor = selectedFloor();
     if (diagActiveScreen === 'tilt') {
       setTiltFloor(floor);
+    } else if (diagActiveScreen === 'iqr') {
+      setIqrFloor(floor);
     } else {
       buildMeshForFloor(floor);
     }
@@ -628,17 +642,169 @@ function setTiltFloor(floor) {
   document.getElementById('btn-export-png').disabled = tiltPointsAll.length === 0;
 }
 
+// Linear-interpolation percentile (numpy's default "linear" method) —
+// standard, unambiguous choice for Q1/Q3 on a small, unevenly-spaced sample.
+function percentileValue(sortedValues, p) {
+  const n = sortedValues.length;
+  if (n === 1) return sortedValues[0];
+  const idx = p * (n - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sortedValues[lo];
+  return sortedValues[lo] + (sortedValues[hi] - sortedValues[lo]) * (idx - lo);
+}
+
+function computeIqrStats(points) {
+  if (!points.length) return null;
+  const sortedValues = points.map((p) => p.value).slice().sort((a, b) => a - b);
+  const q1 = percentileValue(sortedValues, 0.25);
+  const q3 = percentileValue(sortedValues, 0.75);
+  const iqr = q3 - q1;
+  const lowerBound = q1 - 1.5 * iqr;
+  const upperBound = q3 + 1.5 * iqr;
+  const classified = points.map((p) => {
+    let band = 'in';
+    if (p.value < lowerBound) band = 'low';
+    else if (p.value > upperBound) band = 'high';
+    return { ...p, band };
+  });
+  return {
+    q1, q3, iqr, lowerBound, upperBound,
+    points: classified,
+    low: classified.filter((p) => p.band === 'low'),
+    high: classified.filter((p) => p.band === 'high'),
+  };
+}
+
+const IQR_BAND_COLOR = { low: '#2461a8', high: '#b5501f', in: '#5b5346' };
+
+function resizeIqrCanvas() {
+  if (!iqrCanvas) return;
+  const viewport = iqrCanvas.parentElement;
+  const w = viewport.clientWidth;
+  const h = viewport.clientHeight;
+  if (!w || !h) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  iqrCanvas.width = Math.round(w * dpr);
+  iqrCanvas.height = Math.round(h * dpr);
+  iqrCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  renderIqrCanvas();
+}
+
+function renderIqrCanvas() {
+  if (!iqrCtx || !iqrCanvas) return;
+  const cssW = iqrCanvas.parentElement.clientWidth;
+  const cssH = iqrCanvas.parentElement.clientHeight;
+  iqrCtx.clearRect(0, 0, cssW, cssH);
+  iqrCtx.fillStyle = '#ffffff';
+  iqrCtx.fillRect(0, 0, cssW, cssH);
+
+  if (!iqrFloor || !iqrPointsAll.length || !iqrStats) {
+    iqrCtx.fillStyle = '#8a8378';
+    iqrCtx.font = '13px system-ui, sans-serif';
+    iqrCtx.textAlign = 'center';
+    iqrCtx.fillText('No survey points on this floor.', cssW / 2, cssH / 2);
+    return;
+  }
+
+  const t = computeTiltTransform(iqrPointsAll, iqrFloor.boundary, cssW, cssH);
+  if (!t) return;
+
+  if (iqrFloor.boundary && iqrFloor.boundary.length >= 3) {
+    iqrCtx.beginPath();
+    iqrFloor.boundary.forEach((pt, i) => {
+      const c = planToCanvas(pt, t);
+      if (i === 0) iqrCtx.moveTo(c.x, c.y); else iqrCtx.lineTo(c.x, c.y);
+    });
+    iqrCtx.closePath();
+    iqrCtx.strokeStyle = '#d8d2c4';
+    iqrCtx.lineWidth = 1;
+    iqrCtx.stroke();
+  }
+
+  for (const p of iqrStats.points) {
+    const c = planToCanvas(p, t);
+    const isOut = p.band !== 'in';
+    iqrCtx.beginPath();
+    iqrCtx.arc(c.x, c.y, isOut ? 7 : 5, 0, Math.PI * 2);
+    iqrCtx.fillStyle = IQR_BAND_COLOR[p.band];
+    iqrCtx.fill();
+    if (isOut) {
+      iqrCtx.lineWidth = 2;
+      iqrCtx.strokeStyle = '#ffffff';
+      iqrCtx.stroke();
+    }
+    if (p.label) {
+      iqrCtx.fillStyle = '#3a352c';
+      iqrCtx.font = '11px system-ui, sans-serif';
+      iqrCtx.textAlign = 'left';
+      iqrCtx.fillText(p.label, c.x + 9, c.y - 9);
+    }
+  }
+}
+
+function renderIqrResults() {
+  const el = document.getElementById('diag-iqr-results');
+  if (!el) return;
+  if (!iqrPointsAll.length || !iqrStats) {
+    el.innerHTML = '<div class="hint" style="margin:0;">No survey points on this floor.</div>';
+    return;
+  }
+  const s = iqrStats;
+  const rows = [];
+  rows.push(`<div class="row-line"><span>Q1</span><strong>${s.q1.toFixed(3)}</strong></div>`);
+  rows.push(`<div class="row-line"><span>Q3</span><strong>${s.q3.toFixed(3)}</strong></div>`);
+  rows.push(`<div class="row-line"><span>IQR</span><strong>${s.iqr.toFixed(3)}</strong></div>`);
+  rows.push(`<div class="row-line"><span>Band</span><strong>${s.lowerBound.toFixed(3)} to ${s.upperBound.toFixed(3)}</strong></div>`);
+
+  const outPoints = s.low.concat(s.high).sort((a, b) => a.value - b.value);
+  let listHtml;
+  if (outPoints.length) {
+    listHtml = '<div class="iqr-list">' + outPoints.map((p) => {
+      const tagClass = p.band === 'low' ? 'tag-low' : 'tag-high';
+      return `<div class="iqr-list-item"><span>${escapeHtml(p.label || 'point')}</span><span class="${tagClass}">${p.band} · ${p.value.toFixed(3)}</span></div>`;
+    }).join('') + '</div>';
+  } else {
+    listHtml = '<div class="hint" style="margin-top:10px;">All points fall in band.</div>';
+  }
+
+  el.innerHTML = rows.join('') + listHtml;
+}
+
+function initIqrCanvas() {
+  iqrCanvas = document.getElementById('diag-iqr-canvas');
+  iqrCtx = iqrCanvas.getContext('2d');
+  iqrResizeObserver = new ResizeObserver(resizeIqrCanvas);
+  iqrResizeObserver.observe(iqrCanvas.parentElement);
+  resizeIqrCanvas();
+}
+
+function setIqrFloor(floor) {
+  iqrFloor = floor;
+  iqrPointsAll = buildTiltPointsForFloor(floor);
+  iqrStats = computeIqrStats(iqrPointsAll);
+  if (!iqrCanvas) initIqrCanvas(); else resizeIqrCanvas();
+  renderIqrResults();
+  document.getElementById('btn-export-png').disabled = iqrPointsAll.length === 0;
+}
+
 function setDiagScreen(screen) {
   const is3d = screen === '3d';
+  const isTilt = screen === 'tilt';
+  const isIqr = screen === 'iqr';
   document.getElementById('diag-3d-view').style.display = is3d ? '' : 'none';
-  document.getElementById('diag-tilt-view').style.display = is3d ? 'none' : '';
+  document.getElementById('diag-tilt-view').style.display = isTilt ? '' : 'none';
+  document.getElementById('diag-iqr-view').style.display = isIqr ? '' : 'none';
   document.getElementById('btn-screen-3d').classList.toggle('active', is3d);
-  document.getElementById('btn-screen-tilt').classList.toggle('active', !is3d);
+  document.getElementById('btn-screen-tilt').classList.toggle('active', isTilt);
+  document.getElementById('btn-screen-iqr').classList.toggle('active', isIqr);
   diagActiveScreen = screen;
   if (is3d) {
     document.getElementById('btn-export-png').disabled = !mesh;
-  } else {
+  } else if (isTilt) {
     setTiltFloor(selectedFloor());
+  } else if (isIqr) {
+    setIqrFloor(selectedFloor());
   }
 }
 
@@ -680,6 +846,7 @@ async function loadDiagnostics() {
   document.getElementById('diag-screen-tabs').style.display = 'flex';
   document.getElementById('btn-screen-3d').addEventListener('click', () => setDiagScreen('3d'));
   document.getElementById('btn-screen-tilt').addEventListener('click', () => setDiagScreen('tilt'));
+  document.getElementById('btn-screen-iqr').addEventListener('click', () => setDiagScreen('iqr'));
 
   populateFloorPicker();
   initThree();
@@ -706,6 +873,23 @@ async function loadDiagnostics() {
       // Toolbox cabinet integration: also store this capture as a Report
       // Builder exhibit — the customer folder, not just a file on the phone.
       saveDiagnosticsExhibit(padded, `${floor.name || 'Floor'} — Tilt / Deflection`, 'diagnostics-tilt');
+      return;
+    }
+
+    if (diagActiveScreen === 'iqr') {
+      if (!iqrCanvas) return;
+      const padded = padCanvasWithWhiteMargin(iqrCanvas, DIAG_EXHIBIT_MARGIN_PX);
+      const dataUrl = padded.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `${(floor.name || 'floor').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-outliers.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // Toolbox cabinet integration: also store this capture as a Report
+      // Builder exhibit — the customer folder, not just a file on the phone.
+      saveDiagnosticsExhibit(padded, `${floor.name || 'Floor'} — Outlier / IQR range`, 'diagnostics-iqr');
       return;
     }
 

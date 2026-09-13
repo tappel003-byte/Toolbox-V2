@@ -75,6 +75,30 @@
     border: 1px solid var(--line); color: var(--ink-soft);
   }
   .diag-tilt-thresholds span.near { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+  .diag-iqr-viewport {
+    position: relative;
+    height: min(62vh, 560px);
+    min-height: 280px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+  .diag-iqr-viewport canvas { display: block; width: 100%; height: 100%; }
+
+  .diag-iqr-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; color: var(--ink-soft); }
+  .diag-iqr-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .diag-iqr-legend .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  .diag-iqr-results { padding: 12px 0; }
+  .diag-iqr-results .row-line { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  .diag-iqr-results .iqr-list { margin-top: 10px; }
+  .diag-iqr-results .iqr-list-item { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+  .diag-iqr-results .iqr-list-item:last-child { border-bottom: none; }
+  .diag-iqr-results .tag-low { color: #2461a8; font-weight: 700; }
+  .diag-iqr-results .tag-high { color: #b5501f; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -95,6 +119,7 @@
     <div id="diag-screen-tabs" class="diag-screen-tabs" style="display:none;">
       <button type="button" id="btn-screen-3d" class="btn active">3D View</button>
       <button type="button" id="btn-screen-tilt" class="btn">Tilt / Deflection</button>
+      <button type="button" id="btn-screen-iqr" class="btn">Outliers</button>
     </div>
 
     <div id="diag-3d-view">
@@ -121,6 +146,19 @@
         <canvas id="diag-tilt-canvas"></canvas>
       </div>
       <div id="diag-tilt-results" class="diag-tilt-results"></div>
+    </div>
+
+    <div id="diag-iqr-view" style="display:none;">
+      <div class="hint" style="margin-top:0;">Shows which elevation readings fall outside a robust statistical band (Q1 − 1.5×IQR to Q3 + 1.5×IQR) for this floor — not a damage call, just where each reading sits relative to the rest of the survey.</div>
+      <div class="diag-iqr-legend">
+        <span><span class="dot" style="background:#2461a8;"></span>Low (below band)</span>
+        <span><span class="dot" style="background:#5b5346;"></span>In band</span>
+        <span><span class="dot" style="background:#b5501f;"></span>High (above band)</span>
+      </div>
+      <div class="diag-iqr-viewport">
+        <canvas id="diag-iqr-canvas"></canvas>
+      </div>
+      <div id="diag-iqr-results" class="diag-iqr-results"></div>
     </div>
 
     <div class="diag-toolbar">
