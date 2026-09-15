@@ -27,11 +27,17 @@ function showToast(msg) {
 // data, already offline-safe in IndexedDB) load with no connectivity
 // after the first visit.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {
-      // Offline on a first-ever visit, or serving over plain HTTP where
-      // service workers aren't allowed — the app still works online-only
-      // in that case, just without the offline-shell benefit.
+  if (new URLSearchParams(location.search).get('sw') === 'off') {
+    // Escape hatch for a device stuck on a broken cached worker: ?sw=off
+    // unregisters every service worker on this origin instead of registering.
+    navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
+  } else {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {
+        // Offline on a first-ever visit, or serving over plain HTTP where
+        // service workers aren't allowed — the app still works online-only
+        // in that case, just without the offline-shell benefit.
+      });
     });
-  });
+  }
 }
