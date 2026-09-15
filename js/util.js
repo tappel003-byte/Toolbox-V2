@@ -21,23 +21,12 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 1800);
 }
 
-// Registers the app-shell service worker (sw.js) once, from whichever
-// page happens to load first — every screen loads util.js, so this only
-// needs to live in one place. Makes the app itself (not just customer
-// data, already offline-safe in IndexedDB) load with no connectivity
-// after the first visit.
-if ('serviceWorker' in navigator) {
-  if (new URLSearchParams(location.search).get('sw') === 'off') {
-    // Escape hatch for a device stuck on a broken cached worker: ?sw=off
-    // unregisters every service worker on this origin instead of registering.
-    navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
-  } else {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {
-        // Offline on a first-ever visit, or serving over plain HTTP where
-        // service workers aren't allowed — the app still works online-only
-        // in that case, just without the offline-shell benefit.
-      });
-    });
-  }
+// sw.js is NOT registered — it broke Safari (serving a redirect from a
+// service worker permanently kills the page: "Response served by service
+// worker has redirections"). Left in the repo, unregistered, from every
+// page that loads util.js.
+if ('serviceWorker' in navigator && new URLSearchParams(location.search).get('sw') === 'off') {
+  // Escape hatch for a device still stuck on a previously-installed worker:
+  // ?sw=off unregisters every service worker on this origin.
+  navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
 }
