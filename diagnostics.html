@@ -2,6 +2,27 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+  if (navigator.serviceWorker.controller) {
+    // This load is still controlled by a previously-installed worker — the
+    // one serving redirects that Safari refuses. Unregistering alone does
+    // not release control of an already-open tab, so force one reload once
+    // the unregister completes: that reload is a fresh, uncontrolled
+    // navigation with nothing left to intercept it.
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      Promise.all(regs.map(function (r) { return r.unregister(); })).then(function () {
+        location.reload();
+      });
+    });
+  } else {
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      regs.forEach(function (r) { r.unregister(); });
+    });
+  }
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
