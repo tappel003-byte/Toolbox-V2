@@ -23,10 +23,12 @@ function showToast(msg) {
 
 // sw.js is NOT registered — it broke Safari (serving a redirect from a
 // service worker permanently kills the page: "Response served by service
-// worker has redirections"). Left in the repo, unregistered, from every
-// page that loads util.js.
-if ('serviceWorker' in navigator && new URLSearchParams(location.search).get('sw') === 'off') {
-  // Escape hatch for a device still stuck on a previously-installed worker:
-  // ?sw=off unregisters every service worker on this origin.
+// worker has redirections"). Left in the repo, unregistered.
+//
+// Unconditional, every page load: a device that already installed the old
+// worker before this fix shipped needs it removed, not just left alone —
+// waiting on a ?sw=off query the customer would never think to type is not
+// a real fix.
+if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
 }
