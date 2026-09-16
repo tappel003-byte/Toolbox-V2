@@ -196,6 +196,10 @@
 
   /* ---------- HOME ---------- */
   #screenHome{padding:32px 22px;overflow-y:auto;align-items:stretch}
+
+  /* ---------- JOB LEVEL PICKER (Toolbox ?job= entry gate) ---------- */
+  #screenJobLevels{padding:0;overflow-y:auto;align-items:stretch}
+  #screenJobLevels .jl-list{padding:0 22px;display:flex;flex-direction:column;gap:10px;margin-top:6px}
   .home-head{margin-top:24px;margin-bottom:32px;text-align:center}
   .home-head .brand{font-size:11px;letter-spacing:.18em;color:var(--muted);font-weight:600;text-transform:uppercase}
   .home-head h1{font-size:28px;margin:6px 0 0;font-weight:700;letter-spacing:-.02em}
@@ -764,6 +768,29 @@
   </div>
 </div>
 
+<!-- ============ JOB LEVEL PICKER ============
+     Only shown when opened as distress/survey.html?job=<key>. Replaces
+     screenHome + screenSetup's address/plan/rooms entry for that case: the
+     job already has all of that from Toolbox. Picking a level jumps
+     straight into the existing, unmodified screenWork capture UI. -->
+<div id="screenJobLevels" class="screen">
+  <div class="setup-head">
+    <button class="back-btn" onclick="jlBack()" aria-label="Back">←</button>
+    <h2 id="jlTitle">Distress Survey</h2>
+  </div>
+  <div class="setup-body">
+    <div class="field">
+      <label>Survey Date</label>
+      <input type="date" id="jlDate" onchange="jlSetDate(this.value)" style="width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--paper);color:var(--ink);font-size:16px" />
+      <div class="hint">Optional — set today's date before you start capturing.</div>
+    </div>
+    <div class="field">
+      <label>Level <span id="jlLevelsStatus" style="font-weight:400;color:var(--muted);font-size:12px"></span></label>
+      <div id="jlList" class="jl-list"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ============ WORK ============ -->
 <div id="screenWork" class="screen">
   <div class="work-head">
@@ -1038,6 +1065,12 @@
 // app), behavior is unchanged.
 const TOOLBOX_JOB_KEY = new URLSearchParams(location.search).get('job') || null;
 const STORAGE_KEY = TOOLBOX_JOB_KEY ? ('pgg_survey_v1:' + TOOLBOX_JOB_KEY) : 'pgg_survey_v1';
+// Toolbox cabinet integration: the job record and its folder-level list,
+// loaded once when opened as ?job=<key>. Standalone mode (no ?job=) never
+// touches these — they stay null/empty and every job-mode code path below
+// is gated on TOOLBOX_JOB_KEY first.
+let toolboxJob = null;
+let toolboxLevels = [];
 const MAX_IMG_DIM = 2400;        // floor plan downscale cap
 const MAX_PHOTO_DIM = 1600;      // photo downscale cap
 const UNDO_LIMIT = 30;
@@ -1501,6 +1534,11 @@ function goHome() {
   ui.selectedPinId = null;
   ui.undo = [];
   ui.redo = [];
+  if (TOOLBOX_JOB_KEY) {
+    renderJobLevelPicker();
+    showScreen('screenJobLevels');
+    return;
+  }
   renderHome();
   showScreen('screenHome');
 }
@@ -3401,11 +3439,23 @@ function saveProject() {
 }
 
 // ---------- Toolbox cabinet integration (dual-write) ----------
-// After every local save, also mirror this project's pins into the shared
-// Toolbox job record, in the exact shape js/drawer-import.js's CSV importer
-// already produces, so Diagnostics and Report Builder need no changes.
-// This app's own storage (above) remains the source of truth and keeps
-// working standalone; this is an additional write, never a replacement.
+// After every local save, also mirror every internal-mode project's pins
+// into the shared Toolbox job record, in the exact shape js/drawer-import.js's
+// CSV importer already produces, so Diagnostics and Report Builder need no
+// changes. This app's own storage (above) remains the source of truth and
+// keeps working standalone; this is an additional write, never a replacement.
+//
+// In job mode (?job=<key>) a single job can have several internal-mode
+// projects — one per folder level, created by enterJobLevel() below — all
+// sharing this same job-scoped localStorage. Standalone mode never creates
+// more than one relevant project at a time, so this loop is a no-op change
+// for it beyond iterating a list of one.
+function internalProjectsForJob() {
+  return (store.projects || [])
+    .filter((p) => p.mode === 'internal')
+    .slice()
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+}
 let _mirrorInFlight = null;
 function mirrorProjectToJobPocket() {
   if (!TOOLBOX_JOB_KEY || !project) return;
@@ -3414,49 +3464,53 @@ function mirrorProjectToJobPocket() {
   // Report Builder and Diagnostics understand; external-mode pins.csv is a
   // different shape entirely and isn't mirrored.
   if (project.mode !== 'internal') return;
-  const snapshot = project;
+  const internalProjects = internalProjectsForJob();
   _mirrorInFlight = (_mirrorInFlight || Promise.resolve()).then(async () => {
     try {
-      const orientOffset = _orientationOffset(snapshot);
-      const roomLabels = buildRoomLabels(snapshot, orientOffset);
-      const planW = snapshot.plan && snapshot.plan.width, planH = snapshot.plan && snapshot.plan.height;
       const norm = (v, dim) => (typeof v === 'number' && isFinite(v) && dim) ? Math.round((v / dim) * 1e5) / 1e5 : 0;
-      const pins = (snapshot.pins || []).slice().sort((a, b) => (a.num || 0) - (b.num || 0));
-      const mirrored = pins.map((p) => {
-        const photoCount = (p.photos || []).length;
-        const range = photoCount ? (photoCount === 1 ? String(p.num) : (p.num + ' to ' + (p.num + photoCount - 1))) : '';
-        return {
-          pin: p.num,
-          type: p.isExterior ? 'Exterior' : 'Interior',
-          description: (p.description || '').trim(),
-          photoCount,
-          photoNumbers: range,
-          room: p.location || pinRoom(snapshot, p, roomLabels) || '',
-          direction: pinCardinal(snapshot, p, orientOffset) || '',
-          x: norm(p.x, planW),
-          y: norm(p.y, planH),
-        };
-      });
       const job = await getJob(TOOLBOX_JOB_KEY);
       if (!job) return;
       // Merge, never replace: imported pins (from a pins.csv import) are
       // never touched or renumbered here — only the native side is
       // recomputed from this drawer's current state each save. A native
-      // pin number colliding with an imported one gets bumped, same rule
+      // pin number colliding with an imported one — or with another
+      // level's native pin, now that a job can have several level-projects
+      // each numbering their own pins from 1 — gets bumped, same rule
       // js/customer.js's CSV import handler already uses in the other
-      // direction, so re-importing and native capture can never destroy
-      // each other's data no matter which happens first or last.
+      // direction, so nothing native or imported can ever clobber another.
       const existingImported = ((job.distressSurvey && job.distressSurvey.pins) || []).filter((p) => p.origin === 'import');
       const usedNumbers = new Set(existingImported.map((p) => p.pin));
       let nextFree = existingImported.length ? Math.max(...existingImported.map((p) => p.pin)) + 1 : 1;
-      const nativePins = mirrored.map((p) => {
-        const tagged = { ...p, origin: 'native' };
-        if (!usedNumbers.has(tagged.pin)) { usedNumbers.add(tagged.pin); return tagged; }
-        const bumped = { ...tagged, pin: nextFree };
-        usedNumbers.add(nextFree);
-        nextFree += 1;
-        return bumped;
-      });
+      const nativePins = [];
+      for (const proj of internalProjects) {
+        const orientOffset = _orientationOffset(proj);
+        const roomLabels = buildRoomLabels(proj, orientOffset);
+        const planW = proj.plan && proj.plan.width, planH = proj.plan && proj.plan.height;
+        const pins = (proj.pins || []).slice().sort((a, b) => (a.num || 0) - (b.num || 0));
+        for (const p of pins) {
+          const photoCount = (p.photos || []).length;
+          const range = photoCount ? (photoCount === 1 ? String(p.num) : (p.num + ' to ' + (p.num + photoCount - 1))) : '';
+          const mirrored = {
+            pin: p.num,
+            type: p.isExterior ? 'Exterior' : 'Interior',
+            description: (p.description || '').trim(),
+            photoCount,
+            photoNumbers: range,
+            room: p.location || pinRoom(proj, p, roomLabels) || '',
+            direction: pinCardinal(proj, p, orientOffset) || '',
+            x: norm(p.x, planW),
+            y: norm(p.y, planH),
+            origin: 'native',
+          };
+          if (proj.toolboxLevelName) mirrored.level = proj.toolboxLevelName;
+          if (usedNumbers.has(mirrored.pin)) {
+            mirrored.pin = nextFree;
+          }
+          usedNumbers.add(mirrored.pin);
+          if (mirrored.pin >= nextFree) nextFree = mirrored.pin + 1;
+          nativePins.push(mirrored);
+        }
+      }
       job.distressSurvey = { ...(job.distressSurvey || {}), pins: existingImported.concat(nativePins), updatedAt: Date.now() };
       await saveJob(job);
     } catch (e) {
@@ -3482,6 +3536,136 @@ function clearNativeDistressFromJobPocket() {
     }
   });
 }
+
+// ---------- Toolbox cabinet integration (job-mode entry gate) ----------
+// Approved freeze exception: when opened with ?job=<key>, skip this app's
+// own project list (screenHome) and its address/plan/rooms entry
+// (screenSetup) entirely. The job already has all of that from Toolbox —
+// the only thing left to ask is which folder level to work on. Picking one
+// finds or creates that level's own ordinary internal-mode project and
+// hands off to the existing, completely unmodified screenWork.
+function jlBack() {
+  location.href = `../customer.html?job=${encodeURIComponent(TOOLBOX_JOB_KEY)}`;
+}
+function jlSetDate(value) {
+  if (!toolboxJob) return;
+  toolboxJob.date = value;
+  saveJob(toolboxJob).catch((e) => console.warn('Could not save survey date:', e));
+}
+async function initJobLevelPicker() {
+  try {
+    toolboxJob = await getJob(TOOLBOX_JOB_KEY);
+  } catch (e) {
+    console.error(e);
+  }
+  if (!toolboxJob) {
+    toast('Could not open this customer file.');
+    showScreen('screenJobLevels');
+    return;
+  }
+  const name = (toolboxJob.people && toolboxJob.people.primaryName) || 'Customer';
+  document.getElementById('jlTitle').textContent = `Distress Survey — ${name}`;
+  document.getElementById('jlDate').value = toolboxJob.date || '';
+  toolboxLevels = (Array.isArray(toolboxJob.levels) && toolboxJob.levels.length)
+    ? toolboxJob.levels
+    : [{ id: 'level-1', name: 'Main' }];
+  renderJobLevelPicker();
+  showScreen('screenJobLevels');
+}
+function renderJobLevelPicker() {
+  const list = document.getElementById('jlList');
+  const status = document.getElementById('jlLevelsStatus');
+  status.textContent = `— ${toolboxLevels.length} level${toolboxLevels.length === 1 ? '' : 's'}`;
+  list.innerHTML = toolboxLevels.map((level) => {
+    const proj = (store.projects || []).find((p) => p.toolboxLevelId === level.id);
+    const pinCount = proj ? (proj.pins || []).length : 0;
+    return `
+      <button type="button" class="mode-btn" onclick="enterJobLevel('${level.id}')">
+        <div class="icon">🏠</div>
+        <div class="meta">
+          <span>${escapeHtml(level.name || '(unnamed level)')}</span>
+          <small>${pinCount} pin${pinCount === 1 ? '' : 's'}</small>
+        </div>
+      </button>`;
+  }).join('');
+}
+function loadBlobAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => resolve(ev.target.result);
+    reader.onerror = () => reject(new Error('Could not read the plan photo.'));
+    reader.readAsDataURL(blob);
+  });
+}
+// Builds an ordinary internal-mode project for one folder level, using the
+// exact same plan-processing pipeline (resizeImage + addPlanGutter) and
+// plan storage (persistSetupPlan) that manually uploading a plan in
+// screenSetup already uses — nothing about how a project is represented or
+// rendered changes, this just fills one in programmatically instead of via
+// the form.
+async function createLevelProject(level) {
+  const job = toolboxJob;
+  if (!job.planImage) throw new Error('This job has no plan photo yet — add one in Toolbox first.');
+  const rawDataUrl = await loadBlobAsDataUrl(job.planImage);
+  const { dataUrl, width, height } = await new Promise((resolve) => {
+    resizeImage(rawDataUrl, MAX_IMG_DIM, (resizedUrl, w, h) => {
+      addPlanGutter(resizedUrl, w, h, 0.05, (paddedUrl, pw, ph) => resolve({ dataUrl: paddedUrl, width: pw, height: ph }));
+    });
+  });
+  _setupPlan = { dataUrl, width, height };
+  const plan = await persistSetupPlan(null);
+  _setupPlan = null;
+
+  const fd = (job.frontDoor && job.frontDoor.facing) || '';
+  const levelRooms = (job.rooms || [])
+    .filter((r) => r.levelId === level.id && typeof r.x === 'number' && typeof r.y === 'number')
+    .map((r) => ({ name: r.name, x: r.x, y: r.y, confidence: 100 }));
+  const now = Date.now();
+  return {
+    id: uid(),
+    mode: 'internal',
+    address: job.address || '',
+    plan,
+    startNum: 1,
+    nextNum: 1,
+    pins: [],
+    drawings: [],
+    frontDoorFacing: fd,
+    frontDoor: (job.frontDoor && job.frontDoor.marker) ? { x: job.frontDoor.marker.x, y: job.frontDoor.marker.y } : null,
+    rooms: levelRooms,
+    buildingType: job.buildingType || 'residential',
+    north: { x: width * 0.92, y: height * 0.08, rotation: frontDoorToNorthRotation(fd) },
+    createdAt: now,
+    updatedAt: now,
+    toolboxLevelId: level.id,
+    toolboxLevelName: level.name,
+  };
+}
+async function enterJobLevel(levelId) {
+  const level = toolboxLevels.find((l) => l.id === levelId);
+  if (!level) return;
+  let proj = (store.projects || []).find((p) => p.toolboxLevelId === levelId);
+  if (!proj) {
+    try {
+      proj = await createLevelProject(level);
+    } catch (e) {
+      toast(e.message || 'Could not start this level.');
+      return;
+    }
+    store.projects = store.projects || [];
+    store.projects.push(proj);
+    save();
+  }
+  project = proj;
+  const ok = await hydratePlan(project);
+  if (!ok || !project.plan || !project.plan.dataUrl) {
+    toast('Plan photo missing — re-check it in Toolbox.');
+    project = null;
+    return;
+  }
+  enterWork();
+}
+
 function refreshSubtitle() {
   if (!project) return;
   const pins = project.pins || [];
@@ -7079,8 +7263,12 @@ async function _vmOnStop(){
 
 // ---------- Boot ----------
 load();
-renderHome();
-showScreen('screenHome');
+if (TOOLBOX_JOB_KEY) {
+  initJobLevelPicker();
+} else {
+  renderHome();
+  showScreen('screenHome');
+}
 _initRoomVerifyGestures();
 pvSetupGestures();
 </script>
