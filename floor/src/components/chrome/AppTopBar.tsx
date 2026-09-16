@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft, MoreHorizontal, Undo2, Redo2 } from "lucide-react";
+import { getToolboxJobKey } from "@/lib/db";
 
 type Props = {
   projectName: string;
@@ -57,18 +58,35 @@ export function AppTopBar({
 
   const fire = (name: "app:undo" | "app:redo") => window.dispatchEvent(new CustomEvent(name));
 
+  // Approved fix — job mode has no way back to the customer file (only
+  // Distress had this). Opened as .../?job=<key>, the back control leaves
+  // the SPA entirely for the same customer.html?job= target Distress already
+  // uses, instead of Floor's own (unrelated, standalone-only) project list.
+  const jobKey = getToolboxJobKey();
+  const backHref = jobKey ? `/customer.html?job=${encodeURIComponent(jobKey)}` : null;
+
   return (
     <header
       className="sticky top-0 z-50 bg-background/85 backdrop-blur border-b pt-[env(safe-area-inset-top)] landscape-short:pt-[max(env(safe-area-inset-top),1.5rem)] landscape-short:pl-[env(safe-area-inset-left)] landscape-short:pr-[env(safe-area-inset-right)]"
     >
       <div className="flex items-center gap-1 px-2 h-9 text-xs">
-        <Link
-          to="/"
-          className="inline-flex items-center h-8 w-8 justify-center text-muted-foreground hover:text-foreground shrink-0"
-          aria-label="Back to projects"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
+        {backHref ? (
+          <a
+            href={backHref}
+            className="inline-flex items-center h-8 w-8 justify-center text-muted-foreground hover:text-foreground shrink-0"
+            aria-label="Back to customer file"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </a>
+        ) : (
+          <Link
+            to="/"
+            className="inline-flex items-center h-8 w-8 justify-center text-muted-foreground hover:text-foreground shrink-0"
+            aria-label="Back to projects"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        )}
         <div className="flex-1 min-w-0 truncate">
           <span className="font-medium">{projectName}</span>
           <span className="text-muted-foreground"> · {floorName}</span>

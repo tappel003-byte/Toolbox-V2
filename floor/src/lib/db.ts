@@ -311,6 +311,14 @@ function clearJobFloorSurvey(jobKey: string): Promise<void> {
 // recreate a level that already exists. Boundary + exclusions are left
 // empty here on purpose — those stay something the user draws inside this
 // app's own (untouched) Setup/Topo tools, per the freeze.
+// Exposes the same job key the module already computed from ?job=, so chrome
+// (AppTopBar's back control) can point at the right customer file without
+// re-parsing the URL — the query string is gone from the address bar once
+// the router navigates into /projects/$id.
+export function getToolboxJobKey(): string | null {
+  return TOOLBOX_JOB_KEY;
+}
+
 export async function getToolboxJob(): Promise<Record<string, unknown> | null> {
   if (!TOOLBOX_JOB_KEY) return null;
   const pocket = await getJobPocket();
