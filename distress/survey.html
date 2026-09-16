@@ -3589,29 +3589,33 @@ function renderJobLevelPicker() {
       </button>`;
   }).join('');
 }
-function loadBlobAsDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (ev) => resolve(ev.target.result);
-    reader.onerror = () => reject(new Error('Could not read the plan photo.'));
-    reader.readAsDataURL(blob);
-  });
-}
 // Builds an ordinary internal-mode project for one folder level, using the
 // exact same plan-processing pipeline (resizeImage + addPlanGutter) and
 // plan storage (persistSetupPlan) that manually uploading a plan in
 // screenSetup already uses — nothing about how a project is represented or
 // rendered changes, this just fills one in programmatically instead of via
 // the form.
+//
+// Bug fix: reading job.planImage (a Blob out of IndexedDB) via
+// FileReader.readAsDataURL() failed on-device with "Could not read the
+// plan photo." — a real-Blob-from-IndexedDB read, not a missing-file case.
+// An object URL doesn't read the Blob's bytes up front at all; it just
+// hands the browser a reference it resolves lazily when the <img> actually
+// loads, which is what resizeImage() below already does with any src.
 async function createLevelProject(level) {
   const job = toolboxJob;
   if (!job.planImage) throw new Error('This job has no plan photo yet — add one in Toolbox first.');
-  const rawDataUrl = await loadBlobAsDataUrl(job.planImage);
-  const { dataUrl, width, height } = await new Promise((resolve) => {
-    resizeImage(rawDataUrl, MAX_IMG_DIM, (resizedUrl, w, h) => {
-      addPlanGutter(resizedUrl, w, h, 0.05, (paddedUrl, pw, ph) => resolve({ dataUrl: paddedUrl, width: pw, height: ph }));
-    });
-  });
+  const rawUrl = URL.createObjectURL(job.planImage);
+  let dataUrl, width, height;
+  try {
+    ({ dataUrl, width, height } = await new Promise((resolve) => {
+      resizeImage(rawUrl, MAX_IMG_DIM, (resizedUrl, w, h) => {
+        addPlanGutter(resizedUrl, w, h, 0.05, (paddedUrl, pw, ph) => resolve({ dataUrl: paddedUrl, width: pw, height: ph }));
+      });
+    }));
+  } finally {
+    URL.revokeObjectURL(rawUrl);
+  }
   _setupPlan = { dataUrl, width, height };
   const plan = await persistSetupPlan(null);
   _setupPlan = null;
