@@ -7,13 +7,16 @@ const existingKey = params.get('job');
 let planBlob = null;      // File/Blob currently attached to this job
 let planObjectUrl = null; // object URL for previewing planBlob
 let doorMarker = null;    // { x: 0..1, y: 0..1 } relative to the plan photo
-let rooms = [];           // [{ id, name, x?, y? }] — x/y set only for rooms placed on the plan
+let rooms = [];           // [{ id, name, levelId, x?, y? }] — x/y set only for rooms placed on the plan
 let roomCounter = 0;
 let ocrRanOnce = false;
+let levels = [];          // [{ id, name }] — a level (floor) a room can belong to
+let currentLevelId = null;
 
 const els = {
   address: document.getElementById('f-address'),
-  primaryName: document.getElementById('f-primary-name'),
+  firstName: document.getElementById('f-first-name'),
+  lastName: document.getElementById('f-last-name'),
   secondName: document.getElementById('f-second-name'),
   cellPhone: document.getElementById('f-cell-phone'),
   email: document.getElementById('f-email'),
@@ -21,14 +24,19 @@ const els = {
   billingAddressWrap: document.getElementById('f-billing-address-wrap'),
   billingAddress: document.getElementById('f-billing-address'),
   secondAddress: document.getElementById('f-second-address'),
-  inspector: document.getElementById('f-inspector'),
   date: document.getElementById('f-date'),
   notes: document.getElementById('f-notes'),
+  questionnaireBtn: document.getElementById('btn-questionnaire'),
+  questionnaireHint: document.getElementById('questionnaire-hint'),
   planWrap: document.getElementById('plan-photo-wrap'),
   planPlaceholder: document.getElementById('plan-placeholder'),
   planInput: document.getElementById('f-plan-input'),
   btnAddPlan: document.getElementById('btn-add-plan'),
   buildingType: document.getElementById('f-building-type'),
+  levelTabs: document.getElementById('level-tabs'),
+  btnAddLevel: document.getElementById('btn-add-level'),
+  btnRemoveLevel: document.getElementById('btn-remove-level'),
+  currentLevelName: document.getElementById('current-level-name'),
   roomChips: document.getElementById('room-chips'),
   roomList: document.getElementById('room-list'),
   roomsStatus: document.getElementById('rooms-status'),
@@ -45,6 +53,13 @@ const els = {
 
 if (existingKey) {
   els.backLink.href = `customer.html?job=${encodeURIComponent(existingKey)}`;
+  els.questionnaireBtn.href = `questionnaire.html?job=${encodeURIComponent(existingKey)}`;
+  els.questionnaireHint.style.display = 'none';
+} else {
+  els.questionnaireBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    showToast('Save this job first, then the questionnaire will be right here.');
+  });
 }
 
 function showOcrMessage(text) {
@@ -52,11 +67,81 @@ function showOcrMessage(text) {
   els.ocrMessage.style.display = text ? '' : 'none';
 }
 
+// A legacy job saved before the first/last name split only has a single
+// "primaryName" string — best-effort split so it doesn't look wiped the
+// first time this screen reopens it.
+function splitLegacyName(full) {
+  const parts = String(full || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return { firstName: '', lastName: '' };
+  return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+}
+
+// ---- levels (floors a room can belong to) ----
+
+function currentLevel() {
+  return levels.find((l) => l.id === currentLevelId) || levels[0];
+}
+
+function renderLevelTabs() {
+  els.levelTabs.innerHTML = '';
+  for (const level of levels) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip' + (level.id === currentLevelId ? ' chip-added' : '');
+    chip.textContent = level.name || '(unnamed)';
+    chip.addEventListener('click', () => {
+      currentLevelId = level.id;
+      renderLevelTabs();
+      renderRoomsList();
+      renderRoomMarkers();
+      renderChips();
+    });
+    els.levelTabs.appendChild(chip);
+  }
+  const cur = currentLevel();
+  els.currentLevelName.textContent = cur ? cur.name : '';
+  els.btnRemoveLevel.disabled = levels.length <= 1;
+}
+
+els.btnAddLevel.addEventListener('click', () => {
+  const name = (prompt('Level name (e.g. Basement, Main, Second):') || '').trim();
+  if (!name) return;
+  const level = { id: `level-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name };
+  levels.push(level);
+  currentLevelId = level.id;
+  renderLevelTabs();
+  renderRoomsList();
+  renderRoomMarkers();
+  renderChips();
+});
+
+els.btnRemoveLevel.addEventListener('click', () => {
+  if (levels.length <= 1) return;
+  const level = currentLevel();
+  if (!level) return;
+  if (!confirm(`Delete "${level.name}" and every room on it? This cannot be undone.`)) return;
+  levels = levels.filter((l) => l.id !== level.id);
+  rooms = rooms.filter((r) => r.levelId !== level.id);
+  currentLevelId = levels[0].id;
+  renderLevelTabs();
+  renderRoomsList();
+  renderRoomMarkers();
+  renderChips();
+});
+
 // ---- rooms: list rows + plan markers, kept in sync from one `rooms` array ----
+// `rooms` holds every room across every level; everything below filters to
+// the currently selected level so Rooms/chips/markers only ever show one
+// level's rooms at a time.
+
+function roomsOnCurrentLevel() {
+  return rooms.filter((r) => r.levelId === currentLevelId);
+}
 
 function renderRoomsList() {
   els.roomList.innerHTML = '';
-  for (const room of rooms) {
+  const levelRooms = roomsOnCurrentLevel();
+  for (const room of levelRooms) {
     const row = document.createElement('div');
     row.className = 'room-row';
     row.dataset.roomId = room.id;
@@ -79,13 +164,13 @@ function renderRoomsList() {
     });
     els.roomList.appendChild(row);
   }
-  els.roomsStatus.textContent = rooms.length ? `— ${rooms.length} room${rooms.length === 1 ? '' : 's'}` : '';
+  els.roomsStatus.textContent = levelRooms.length ? `— ${levelRooms.length} room${levelRooms.length === 1 ? '' : 's'}` : '';
 }
 
 function renderRoomMarkers() {
   els.planWrap.querySelectorAll('.room-marker').forEach((el) => el.remove());
   if (!els.planWrap.querySelector('img')) return;
-  for (const room of rooms) {
+  for (const room of roomsOnCurrentLevel()) {
     if (typeof room.x !== 'number' || typeof room.y !== 'number') continue;
     const marker = document.createElement('div');
     marker.className = 'room-marker';
@@ -106,7 +191,7 @@ function renderRoomMarkers() {
 
 function addRoom(name, x, y) {
   roomCounter += 1;
-  const room = { id: `r${roomCounter}-${Date.now()}`, name };
+  const room = { id: `r${roomCounter}-${Date.now()}`, name, levelId: currentLevelId };
   if (typeof x === 'number' && typeof y === 'number') {
     room.x = x;
     room.y = y;
@@ -117,7 +202,7 @@ function addRoom(name, x, y) {
 
 function findRoomByName(name) {
   const lower = name.trim().toLowerCase();
-  return rooms.find((r) => r.name.trim().toLowerCase() === lower);
+  return roomsOnCurrentLevel().find((r) => r.name.trim().toLowerCase() === lower);
 }
 
 // Quick-tap chips for the selected building type's common rooms. Tapping an
@@ -214,8 +299,8 @@ els.planInput.addEventListener('change', () => {
   if (!file) return;
   planBlob = file;
   doorMarker = null; // a new photo invalidates the old pin position
-  // Room positions were measured against the old photo; drop them but keep names.
-  rooms = rooms.map((r) => ({ id: r.id, name: r.name }));
+  // Room positions were measured against the old photo; drop them but keep names/levels.
+  rooms = rooms.map((r) => ({ id: r.id, name: r.name, levelId: r.levelId }));
   ocrRanOnce = false;
   els.btnOcrMore.style.display = 'none';
   showOcrMessage('');
@@ -225,14 +310,15 @@ els.planInput.addEventListener('change', () => {
 
 // ---- OCR room auto-fill ----
 
-// Merge freshly-scanned rooms into the current list without clobbering
-// manual entries: a name match with no position yet is upgraded with the
-// scanned position; a hit near an existing pin is skipped; everything else
-// is added new.
+// Merge freshly-scanned rooms into the current level's list without
+// clobbering manual entries: a name match with no position yet is upgraded
+// with the scanned position; a hit near an existing pin is skipped;
+// everything else is added new, on the level being worked on right now.
 function mergeScannedRooms(found) {
   let addedCount = 0;
   for (const f of found) {
-    const nearby = rooms.find((r) => typeof r.x === 'number' && Math.hypot(r.x - f.x, r.y - f.y) < 0.05);
+    const levelRooms = roomsOnCurrentLevel();
+    const nearby = levelRooms.find((r) => typeof r.x === 'number' && Math.hypot(r.x - f.x, r.y - f.y) < 0.05);
     if (nearby) continue;
     const byName = findRoomByName(f.name);
     if (byName && typeof byName.x !== 'number') {
@@ -283,11 +369,19 @@ els.btnOcrMore.addEventListener('click', async () => {
   const oldText = els.btnOcrMore.textContent;
   showOcrMessage('Preparing deep scan…');
   try {
-    const { rooms: merged, addedCount } = await RoomOCR.findMore(planObjectUrl, els.buildingType.value, rooms, (msg) => {
+    const levelRooms = roomsOnCurrentLevel();
+    const { rooms: merged, addedCount } = await RoomOCR.findMore(planObjectUrl, els.buildingType.value, levelRooms, (msg) => {
       els.btnOcrMore.textContent = msg;
       showOcrMessage(msg);
     });
-    rooms = merged.map((r, i) => ({ id: rooms[i] ? rooms[i].id : `r${++roomCounter}-${Date.now()}`, name: r.name, x: r.x, y: r.y }));
+    const mergedWithIds = merged.map((r, i) => ({
+      id: levelRooms[i] ? levelRooms[i].id : `r${++roomCounter}-${Date.now()}`,
+      name: r.name,
+      x: r.x,
+      y: r.y,
+      levelId: currentLevelId,
+    }));
+    rooms = rooms.filter((r) => r.levelId !== currentLevelId).concat(mergedWithIds);
     renderRoomsList();
     renderRoomMarkers();
     renderChips();
@@ -336,11 +430,19 @@ els.form.addEventListener('submit', async (evt) => {
     }
   }
 
+  const firstName = els.firstName.value.trim();
+  const lastName = els.lastName.value.trim();
+
   const job = {
     ...(existingRecord || {}),
     address,
     people: {
-      primaryName: els.primaryName.value.trim(),
+      firstName,
+      lastName,
+      // Derived display name — home.js, report.js, and diagnostics.js all
+      // show one string for "who this job is"; keeping it in sync here
+      // means none of those had to change just for the first/last split.
+      primaryName: [firstName, lastName].filter(Boolean).join(' '),
       secondName: els.secondName.value.trim(),
       cellPhone: els.cellPhone.value.trim(),
       email: els.email.value.trim(),
@@ -348,13 +450,13 @@ els.form.addEventListener('submit', async (evt) => {
       billingAddress: els.billingSame.checked ? '' : els.billingAddress.value.trim(),
       secondAddress: els.secondAddress.value.trim(),
     },
-    inspector: els.inspector.value.trim(),
     date: els.date.value,
     notes: els.notes.value.trim(),
     planImage: planBlob || null,
     planImageType: planBlob ? planBlob.type : null,
     buildingType: els.buildingType.value,
-    rooms: rooms.map((r) => ({ id: r.id, name: r.name.trim(), x: r.x, y: r.y })).filter((r) => r.name),
+    levels: levels.map((l) => ({ id: l.id, name: l.name.trim() || l.name })),
+    rooms: rooms.map((r) => ({ id: r.id, name: r.name.trim(), levelId: r.levelId, x: r.x, y: r.y })).filter((r) => r.name),
     frontDoor: {
       facing: els.doorFacing.value,
       marker: doorMarker,
@@ -370,6 +472,10 @@ els.form.addEventListener('submit', async (evt) => {
 });
 
 async function loadExistingJob() {
+  // Brand-new job: start with one default level so Rooms has somewhere to attach.
+  levels = [{ id: 'level-1', name: 'Main' }];
+  currentLevelId = levels[0].id;
+  renderLevelTabs();
   renderChips();
   if (!existingKey) return;
   const job = await getJob(existingKey);
@@ -377,7 +483,15 @@ async function loadExistingJob() {
 
   els.address.value = job.address || '';
   const people = job.people || {};
-  els.primaryName.value = people.primaryName || '';
+  let firstName = people.firstName || '';
+  let lastName = people.lastName || '';
+  if (!firstName && !lastName && people.primaryName) {
+    const split = splitLegacyName(people.primaryName);
+    firstName = split.firstName;
+    lastName = split.lastName;
+  }
+  els.firstName.value = firstName;
+  els.lastName.value = lastName;
   els.secondName.value = people.secondName || '';
   els.cellPhone.value = people.cellPhone || '';
   els.email.value = people.email || '';
@@ -385,7 +499,6 @@ async function loadExistingJob() {
   els.billingAddress.value = people.billingAddress || '';
   els.secondAddress.value = people.secondAddress || '';
   renderBillingAddressField();
-  els.inspector.value = job.inspector || '';
   els.date.value = job.date || '';
   els.notes.value = job.notes || '';
   els.buildingType.value = job.buildingType || 'residential';
@@ -393,15 +506,28 @@ async function loadExistingJob() {
   planBlob = job.planImage || null;
   renderPlanPhoto(planBlob);
 
+  // A job saved before Levels existed has no job.levels and no levelId on
+  // its rooms — keep the default "Main" level and put every such room on
+  // it, rather than losing them.
+  levels = Array.isArray(job.levels) && job.levels.length
+    ? job.levels.map((l) => ({ id: l.id, name: l.name }))
+    : levels;
+  currentLevelId = levels[0].id;
+
   rooms = (job.rooms || []).map((r) => {
     roomCounter += 1;
-    const room = { id: r.id || `r${roomCounter}-${Date.now()}`, name: r.name };
+    const room = {
+      id: r.id || `r${roomCounter}-${Date.now()}`,
+      name: r.name,
+      levelId: r.levelId || levels[0].id,
+    };
     if (typeof r.x === 'number' && typeof r.y === 'number') {
       room.x = r.x;
       room.y = r.y;
     }
     return room;
   });
+  renderLevelTabs();
   renderRoomsList();
   renderRoomMarkers();
   renderChips();

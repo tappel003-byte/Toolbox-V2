@@ -58,12 +58,12 @@
       <div class="stack">
         <div class="row">
           <div>
-            <label for="f-primary-name">Primary Name</label>
-            <input type="text" id="f-primary-name" placeholder="Homeowner name">
+            <label for="f-first-name">First Name</label>
+            <input type="text" id="f-first-name" placeholder="First name">
           </div>
           <div>
-            <label for="f-second-name">Spouse / Second Name</label>
-            <input type="text" id="f-second-name" placeholder="Optional">
+            <label for="f-last-name">Last Name</label>
+            <input type="text" id="f-last-name" placeholder="Last name">
           </div>
         </div>
         <div class="row">
@@ -75,6 +75,10 @@
             <label for="f-email">Email</label>
             <input type="email" id="f-email" placeholder="name@example.com">
           </div>
+        </div>
+        <div>
+          <label for="f-second-name">Spouse / Partner Name</label>
+          <input type="text" id="f-second-name" placeholder="Optional">
         </div>
         <div>
           <label class="checkbox-label">
@@ -96,21 +100,21 @@
     <fieldset class="section-gap">
       <legend>Visit</legend>
       <div class="stack">
-        <div class="row">
-          <div>
-            <label for="f-inspector">Inspector</label>
-            <input type="text" id="f-inspector" placeholder="Who's on this job">
-          </div>
-          <div>
-            <label for="f-date">Date</label>
-            <input type="date" id="f-date">
-          </div>
+        <div>
+          <label for="f-date">Date</label>
+          <input type="date" id="f-date">
         </div>
         <div>
           <label for="f-notes">Notes</label>
           <textarea id="f-notes" placeholder="Anything worth flagging before a drawer opens"></textarea>
         </div>
       </div>
+    </fieldset>
+
+    <fieldset class="section-gap" id="questionnaire-fieldset">
+      <legend>Questionnaire</legend>
+      <a id="btn-questionnaire" href="#" class="btn">📋 Symptom Questionnaire</a>
+      <div class="hint" id="questionnaire-hint">Save this job once, then come back to fill this out.</div>
     </fieldset>
 
     <fieldset class="section-gap">
@@ -121,7 +125,7 @@
           <div class="hint">Tap below to add one, then tap the photo to set the front door</div>
         </div>
       </div>
-      <input type="file" id="f-plan-input" accept="image/*" capture="environment" style="display:none">
+      <input type="file" id="f-plan-input" accept="image/*" style="display:none">
       <div class="stack" style="margin-top:10px;">
         <button type="button" id="btn-add-plan" class="btn">Add / Replace Plan Photo</button>
       </div>
@@ -138,6 +142,16 @@
         <option value="warehouse">Warehouse</option>
       </select>
       <div class="hint">Sets which rooms show up as quick-tap chips and what "Read labels" hunts for.</div>
+    </fieldset>
+
+    <fieldset class="section-gap">
+      <legend>Levels</legend>
+      <div id="level-tabs" class="chip-row"></div>
+      <div class="row" style="margin-top:10px;">
+        <button type="button" id="btn-add-level" class="btn">+ Add Level</button>
+        <button type="button" id="btn-remove-level" class="btn btn-danger">Remove <span id="current-level-name"></span></button>
+      </div>
+      <div class="hint">Basement, Main, Second — whatever this property actually has. Rooms below belong to whichever level is selected.</div>
     </fieldset>
 
     <fieldset class="section-gap">

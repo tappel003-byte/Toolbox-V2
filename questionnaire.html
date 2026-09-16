@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+  if (navigator.serviceWorker.controller) {
+    // This load is still controlled by a previously-installed worker — the
+    // one serving redirects that Safari refuses. Unregistering alone does
+    // not release control of an already-open tab, so force one reload once
+    // the unregister completes: that reload is a fresh, uncontrolled
+    // navigation with nothing left to intercept it.
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      Promise.all(regs.map(function (r) { return r.unregister(); })).then(function () {
+        location.reload();
+      });
+    });
+  } else {
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      regs.forEach(function (r) { r.unregister(); });
+    });
+  }
+})();
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#f4f0e8">
+<title>Toolbox</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<header class="app-bar">
+  <a class="back" id="back-link" href="index.html">‹ Customer Info</a>
+  <h1>Questionnaire</h1>
+  <span></span>
+</header>
+
+<main>
+  <form id="questionnaire-form" class="stack">
+    <fieldset class="section-gap">
+      <legend>Symptom Questionnaire</legend>
+      <div class="stack">
+        <div>
+          <label for="f-started-when">When did this start?</label>
+          <input type="text" id="f-started-when" placeholder="e.g. About 6 months ago">
+        </div>
+        <div>
+          <label for="f-noticed">What have they noticed?</label>
+          <textarea id="f-noticed" placeholder="Cracks, sticking doors, sloping floors…"></textarea>
+        </div>
+        <div>
+          <label for="f-other-notes">Other Notes</label>
+          <textarea id="f-other-notes" placeholder="Anything else worth recording"></textarea>
+        </div>
+      </div>
+    </fieldset>
+
+    <div class="stack section-gap">
+      <button type="submit" class="btn btn-primary">Save Questionnaire</button>
+    </div>
+  </form>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script src="js/util.js"></script>
+<script src="js/db.js"></script>
+<script src="js/questionnaire.js"></script>
+</body>
+</html>
