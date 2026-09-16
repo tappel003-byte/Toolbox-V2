@@ -224,62 +224,23 @@ export function registerServiceWorker(): void {
   if (typeof window === "undefined") return;
   if (!("serviceWorker" in navigator)) return;
 
-  const swParam = new URLSearchParams(window.location.search).get("sw");
-
-  if (swParam === "off") {
-    void (async () => {
-      await unregisterAppServiceWorkers();
-      await clearAppShellCaches();
-    })();
-    return;
-  }
-
-  const forceOn = swParam === "on";
-
-  const shouldRefuse =
-    !forceOn &&
-    (!import.meta.env.PROD ||
-      window.self !== window.top ||
-      hostnameMatchesPreview(window.location.hostname));
-
-  if (shouldRefuse) {
-    void unregisterAppServiceWorkers();
-    return;
-  }
-
-  getOfflineMode();
-
-  // Offline mode is on by default for field use.
-  try {
-    if (forceOn || window.localStorage.getItem(OFFLINE_MODE_KEY) !== "on") {
-      window.localStorage.setItem(OFFLINE_MODE_KEY, "on");
-    }
-  } catch {
-    // ignore
-  }
-
-  const doRegister = () => {
-    setupControllerReload();
-    navigator.serviceWorker
-      .register(APP_SW_URL)
-      .then((registration) => {
-        trackUpdates(registration);
-        checkForUpdate(registration);
-
-        window.addEventListener("pageshow", () => checkForUpdate(registration));
-        window.addEventListener("focus", () => checkForUpdate(registration));
-        document.addEventListener("visibilitychange", () => {
-          if (document.visibilityState === "visible") checkForUpdate(registration);
-        });
-      })
-      .catch(() => {
-        // Registration failed — app still works online.
-      });
-  };
-
-  if (document.readyState === "complete") {
-    doRegister();
-  } else {
-    window.addEventListener("load", doRegister, { once: true });
-  }
+  // Approved fix — Floor side of the same Safari bug already fixed in
+  // Distress: this used to register APP_SW_URL ("/sw.js") with the
+  // default scope, which resolves to "/" — the whole Toolbox Pages
+  // origin, not just this app. Cloudflare Pages' own redirects plus a
+  // root-scoped worker is exactly what Safari refuses ("Response served
+  // by service worker has redirections") on Back / next-drawer /
+  // close-file. In job mode (?job=, the only way this app is really used
+  // inside Toolbox) registering here is forbidden outright. Standalone is
+  // allowed a worker only if scoped under /floor/, never / — rather than
+  // relocate the real sw.js build output to prove that scope everywhere
+  // Pages serves it, this makes the same choice already accepted for
+  // Distress: never register here either, and unregister anything already
+  // installed from before this fix. setOfflineMode("on") calls this same
+  // function, so the manual offline-mode toggle can no longer trigger the
+  // same bug either.
+  void (async () => {
+    await unregisterAppServiceWorkers();
+    await clearAppShellCaches();
+  })();
 }
