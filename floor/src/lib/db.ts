@@ -301,3 +301,108 @@ function clearJobFloorSurvey(jobKey: string): Promise<void> {
   });
   return mirrorChain;
 }
+
+// ---------- Toolbox cabinet integration (job-mode entry gate) ----------
+// Approved freeze exception: when opened with ?job=<key>, skip this app's
+// own new-project entry (name/address/client typed by hand) — the job
+// already has that. getOrCreateJobProject() finds-or-makes the one project
+// this job owns; syncFloorsFromJobLevels() finds-or-makes one Floor per
+// folder level, named to match so re-opening never asks the user to
+// recreate a level that already exists. Boundary + exclusions are left
+// empty here on purpose — those stay something the user draws inside this
+// app's own (untouched) Setup/Topo tools, per the freeze.
+export async function getToolboxJob(): Promise<Record<string, unknown> | null> {
+  if (!TOOLBOX_JOB_KEY) return null;
+  const pocket = await getJobPocket();
+  const job = await pocket.get("jobs", TOOLBOX_JOB_KEY);
+  return job ?? null;
+}
+
+export async function getOrCreateJobProject(job: {
+  address?: string;
+  people?: { primaryName?: string };
+}): Promise<ProjectMeta> {
+  if (!TOOLBOX_JOB_KEY) throw new Error("Not opened as ?job=<key>");
+  const existing = await listProjects(); // already filtered to this job
+  if (existing.length) return existing[0];
+  const now = Date.now();
+  const meta: ProjectMeta = {
+    id: uid(),
+    name: job.address || "Survey",
+    address: job.address || "",
+    client: (job.people && job.people.primaryName) || "",
+    inspector: "",
+    inspectionDate: "",
+    notes: "",
+    createdAt: now,
+    updatedAt: now,
+  };
+  await saveProject(meta); // auto-tags toolboxJobKey on first save
+  return meta;
+}
+
+// Reading job.planImage (a Blob out of IndexedDB) the same way the Distress
+// drawer's equivalent bug was fixed: an object URL, not FileReader — it
+// doesn't read the Blob's bytes up front, it just hands the browser a
+// reference the <img> resolves lazily when it actually loads.
+async function blobToDataUrl(blob: Blob): Promise<{ dataUrl: string; width: number; height: number }> {
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("Could not read the plan photo."));
+      el.src = objectUrl;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas not supported");
+    ctx.drawImage(img, 0, 0);
+    return {
+      dataUrl: canvas.toDataURL("image/jpeg", 0.85),
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+    };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+export async function syncFloorsFromJobLevels(
+  projectId: string,
+  levels: Array<{ id: string; name: string }>,
+  planImage: Blob | null,
+): Promise<Floor[]> {
+  const existingFloors = await listFloors(projectId);
+  let planShape: { dataUrl: string; width: number; height: number } | null = null;
+  const result: Floor[] = [];
+  for (let i = 0; i < levels.length; i++) {
+    const level = levels[i];
+    const match = existingFloors.find((f) => f.name === level.name);
+    if (match) {
+      result.push(match);
+      continue;
+    }
+    if (!planShape && planImage) {
+      planShape = await blobToDataUrl(planImage);
+    }
+    const now = Date.now();
+    const floor: Floor = {
+      id: uid(),
+      projectId,
+      name: level.name,
+      order: i,
+      planDataUrl: planShape?.dataUrl,
+      planWidth: planShape?.width,
+      planHeight: planShape?.height,
+      boundary: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await saveFloor(floor);
+    result.push(floor);
+  }
+  return result;
+}
