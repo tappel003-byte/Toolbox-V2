@@ -64,106 +64,20 @@
 
 <script>
 (() => {
-  const SW_PATH = "/sw.js";
-  const KILL_KEY = "lovable:sw:killed";
-  const APP_CACHE_PATTERN = /^(workbox-|html-navigations$|app-shell-assets$|cdn-libs$|html-shell$)/;
-
-  const isPreviewOrDevHost = () => {
-    const { hostname } = window.location;
-    return (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname.startsWith("id-preview--") ||
-      hostname.startsWith("preview--") ||
-      hostname === "lovableproject.com" ||
-      hostname.endsWith(".lovableproject.com") ||
-      hostname === "lovableproject-dev.com" ||
-      hostname.endsWith(".lovableproject-dev.com") ||
-      hostname === "beta.lovable.dev" ||
-      hostname.endsWith(".beta.lovable.dev") ||
-      hostname === "lovable.dev" ||
-      hostname.endsWith(".lovable.dev")
-    );
-  };
-
-  const readKillSwitch = () => {
-    try {
-      const sw = new URLSearchParams(window.location.search).get("sw");
-      if (sw === "off") {
-        try { window.localStorage.setItem(KILL_KEY, "1"); } catch {}
-        return true;
-      }
-      if (sw === "on") {
-        try { window.localStorage.removeItem(KILL_KEY); } catch {}
-        return false;
-      }
-      return window.localStorage.getItem(KILL_KEY) === "1";
-    } catch {
-      return false;
-    }
-  };
-
-  const unregisterMatchingAndPurge = async () => {
-    if (!("serviceWorker" in navigator)) return;
-    try {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(async (registration) => {
-        const url = registration.active?.scriptURL || registration.installing?.scriptURL || registration.waiting?.scriptURL || "";
-        if (url.endsWith(SW_PATH)) {
-          try { await registration.unregister(); } catch {}
-        }
-      }));
-      if ("caches" in window) {
-        const names = await caches.keys();
-        await Promise.all(names
-          .filter((name) => APP_CACHE_PATTERN.test(name))
-          .map((name) => caches.delete(name).catch(() => false)));
-      }
-    } catch {}
-  };
-
+  // This file is only ever served embedded inside the Toolbox Pages origin
+  // now (distress/survey.html) — it used to register a worker at SW_PATH
+  // "/sw.js" with scope "/", which claims the ENTIRE Toolbox origin, not
+  // just this page. Cloudflare Pages' own redirects plus a root-scoped
+  // worker is exactly what breaks Safari ("Response served by service
+  // worker has redirections") on Back / next-drawer / close-file — no
+  // Toolbox page registers a worker either (js/util.js), so this was the
+  // one thing still claiming the origin. Never register here again, in
+  // job mode or standalone — just clear anything already installed from
+  // before this fix, on every load.
   if (!("serviceWorker" in navigator)) return;
-
-  // NOTE: intentionally NOT bailing on window.self !== window.top — this page
-  // is loaded both directly (home-screen shortcut) and inside the React
-  // shell's <iframe>. In both cases this document IS the visible UI, so it
-  // owns SW registration and the update banner.
-
-  if (readKillSwitch() || isPreviewOrDevHost()) {
-    void unregisterMatchingAndPurge();
-    return;
-  }
-
-  // No auto-activate / auto-reload. Updates happen only when the user taps
-  // the "Update app" link (see #updateAppLink logic further down).
-
-
-
-
-  let lastCheck = 0;
-  const checkForUpdate = (registration) => {
-    const now = Date.now();
-    if (now - lastCheck < 10000) return;
-    lastCheck = now;
-    registration.update().catch(() => {});
-  };
-
-  const register = () => {
-    navigator.serviceWorker.register(SW_PATH, { scope: "/" }).then((registration) => {
-      checkForUpdate(registration);
-      window.addEventListener("pageshow", () => checkForUpdate(registration));
-      window.addEventListener("focus", () => checkForUpdate(registration));
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") checkForUpdate(registration);
-      });
-    }).catch(() => {});
-  };
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", register, { once: true });
-  } else {
-    register();
-  }
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    regs.forEach((r) => r.unregister().catch(() => {}));
+  }).catch(() => {});
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
