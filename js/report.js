@@ -74,11 +74,36 @@ function distressSurveyDateLabel(ds) {
   return ds.updatedAt ? `updated ${formatUpdated(ds.updatedAt)}` : `imported ${formatUpdated(ds.importedAt)}`;
 }
 
-function renderPinScheduleSection(job) {
-  const ds = job.distressSurvey;
-  if (!ds || !ds.pins || !ds.pins.length) return '';
+// A job's pins can span several folder levels (Main, Basement, ...) since
+// each level maps to its own internal-mode Distress project — every pin
+// mirrored from job mode carries the level it came from (`p.level`);
+// pins.csv imports predate levels and carry none. Groups pins by level so
+// two floors' own "Pin 1" never land in the same row/table, ordered to
+// match job.levels (the folder's own level order) with anything else
+// (an unrecognized level name, or no level at all) appended after.
+function groupPinsByLevel(job, pins) {
+  const groups = new Map();
+  for (const p of pins) {
+    const key = p.level || null;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+  for (const arr of groups.values()) arr.sort((a, b) => a.pin - b.pin);
 
-  const pins = ds.pins.slice().sort((a, b) => a.pin - b.pin);
+  const levelOrder = (job.levels || []).map((l) => l.name);
+  const ordered = levelOrder.filter((name) => groups.has(name));
+  const remaining = [...groups.keys()].filter((k) => !ordered.includes(k));
+  remaining.sort((a, b) => {
+    if (a === null) return 1;
+    if (b === null) return -1;
+    return a.localeCompare(b);
+  });
+  ordered.push(...remaining);
+
+  return ordered.map((key) => ({ level: key, pins: groups.get(key) }));
+}
+
+function pinScheduleTable(pins) {
   const rows = pins.map((p) => {
     const isExterior = (p.type || '').toLowerCase() === 'exterior';
     return `
@@ -92,7 +117,6 @@ function renderPinScheduleSection(job) {
   }).join('');
 
   return `
-    <div style="font-weight:700;margin-bottom:8px;">Distress Survey — Pin Schedule</div>
     <table class="pin-schedule">
       <thead>
         <tr>
@@ -104,8 +128,26 @@ function renderPinScheduleSection(job) {
         </tr>
       </thead>
       <tbody>${rows}</tbody>
-    </table>
-    <div class="hint" style="margin-top:10px;">${pins.length} pin${pins.length === 1 ? '' : 's'} · ${distressSurveyDateLabel(ds)}</div>
+    </table>`;
+}
+
+function renderPinScheduleSection(job) {
+  const ds = job.distressSurvey;
+  if (!ds || !ds.pins || !ds.pins.length) return '';
+
+  const groups = groupPinsByLevel(job, ds.pins);
+  const multiGroup = groups.length > 1;
+  const sections = groups.map(({ level, pins }) => {
+    const heading = multiGroup
+      ? `<div class="pin-level-heading">${escapeHtml(level || 'Imported (no level)')}</div>`
+      : '';
+    return heading + pinScheduleTable(pins);
+  }).join('');
+
+  return `
+    <div style="font-weight:700;margin-bottom:8px;">Distress Survey — Pin Schedule</div>
+    ${sections}
+    <div class="hint" style="margin-top:10px;">${ds.pins.length} pin${ds.pins.length === 1 ? '' : 's'} · ${distressSurveyDateLabel(ds)}</div>
   `;
 }
 
@@ -174,10 +216,13 @@ async function buildReportPdf(job) {
     y += 0.2;
   }
 
-  // Distress Survey pin schedule
+  // Distress Survey pin schedule — grouped by folder level (see
+  // groupPinsByLevel) so two floors' own "Pin 1" never land in the same
+  // table looking like one list.
   const ds = job.distressSurvey;
   if (ds && ds.pins && ds.pins.length) {
-    const pins = ds.pins.slice().sort((a, b) => a.pin - b.pin);
+    const groups = groupPinsByLevel(job, ds.pins);
+    const multiGroup = groups.length > 1;
 
     const colPin = 0.5, colPhoto = 0.7, colRoom = 1.6, colDir = 0.6;
     const tableX = margin;
@@ -206,30 +251,45 @@ async function buildReportPdf(job) {
     pdf.setTextColor(20);
     pdf.text('Distress Survey — Pin Schedule', margin, y);
     y += 0.25;
-    drawTableHeader();
 
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(9);
-    pins.forEach((p) => {
-      if (y + rowH > pageH - margin - 0.2) {
-        pdf.addPage([11, 17], 'landscape');
-        y = margin + 0.65;
-        drawTableHeader();
-        pdf.setFont('helvetica', 'normal');
-        pdf.setFontSize(9);
+    groups.forEach(({ level, pins }) => {
+      if (multiGroup) {
+        if (y + 0.2 + headerH > pageH - margin - 0.2) {
+          pdf.addPage([11, 17], 'landscape');
+          y = margin + 0.65;
+        }
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(10);
+        pdf.setTextColor(20);
+        pdf.text(level || 'Imported (no level)', margin, y);
+        y += 0.22;
       }
-      pdf.setDrawColor(200);
-      pdf.setLineWidth(0.006);
-      pdf.line(tableX, y, tableX + tableW, y);
-      const ty = y + rowH / 2 + 0.03;
-      pdf.setTextColor(30);
-      pdf.text(String(p.pin), colX[0] + 0.06, ty);
-      pdf.text(pinPhotoLabel(p), colX[1] + 0.06, ty);
-      pdf.text(p.room || '', colX[2] + 0.06, ty);
-      pdf.text(p.direction || '', colX[3] + 0.06, ty);
-      const noteLines = pdf.splitTextToSize(p.description || '', colNotes - 0.12).slice(0, 2);
-      noteLines.forEach((line, i) => pdf.text(line, colX[4] + 0.06, y + 0.13 + i * 0.15));
-      y += rowH;
+      drawTableHeader();
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(9);
+      pins.forEach((p) => {
+        if (y + rowH > pageH - margin - 0.2) {
+          pdf.addPage([11, 17], 'landscape');
+          y = margin + 0.65;
+          drawTableHeader();
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(9);
+        }
+        pdf.setDrawColor(200);
+        pdf.setLineWidth(0.006);
+        pdf.line(tableX, y, tableX + tableW, y);
+        const ty = y + rowH / 2 + 0.03;
+        pdf.setTextColor(30);
+        pdf.text(String(p.pin), colX[0] + 0.06, ty);
+        pdf.text(pinPhotoLabel(p), colX[1] + 0.06, ty);
+        pdf.text(p.room || '', colX[2] + 0.06, ty);
+        pdf.text(p.direction || '', colX[3] + 0.06, ty);
+        const noteLines = pdf.splitTextToSize(p.description || '', colNotes - 0.12).slice(0, 2);
+        noteLines.forEach((line, i) => pdf.text(line, colX[4] + 0.06, y + 0.13 + i * 0.15));
+        y += rowH;
+      });
+      y += multiGroup ? 0.15 : 0;
     });
   }
 
